@@ -7,7 +7,7 @@ Time series analysis and forecasting using complex variables
 
 ![hex-sticker of the complex package for R](https://github.com/config-i1/complex/blob/master/man/figures/complex-web.png?raw=true)
 
-The package includes basic instruments for correlation and regression analysis of complex-valued variables. The package supports the monograph by Svetunkov & Svetunkov "Complex-valued Econometrics with Examples in R", which is to be published by Springer in 2024.
+The package includes basic instruments for correlation and regression analysis of complex-valued variables. The package supports the monograph by Svetunkov & Svetunkov "Complex-valued Econometrics with Examples in R" <[doi:10.1007/978-3-031-62608-1](https://doi.org/10.1007%2F978-3-031-62608-1)>.
 
 
 ### Installation
