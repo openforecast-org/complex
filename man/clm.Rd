@@ -8,8 +8,9 @@
 \title{Complex Linear Model}
 \usage{
 clm(formula, data, subset, na.action, loss = c("likelihood", "OLS", "CLS",
-  "MSE", "MAE", "HAM"), orders = c(0, 0, 0), scaling = c("normalisation",
-  "standardisation", "max", "none"), parameters = NULL, fast = FALSE, ...)
+  "MSE", "MAE", "HAM"), distribution = c("dcnorm", "dcgnorm"),
+  orders = c(0, 0, 0), scaling = c("normalisation", "standardisation",
+  "max", "none"), parameters = NULL, fast = FALSE, ...)
 
 \method{sigma}{clm}(object, type = NULL, ...)
 
@@ -53,6 +54,17 @@ example:
 
 \code{lossFunction <- function(actual, fitted, B, xreg) return(mean(abs(actual-fitted)))}
 \code{loss=lossFunction}}
+
+\item{distribution}{the distribution used in the likelihood, when \code{loss="likelihood"}:
+\itemize{
+\item \code{"dcnorm"} - complex normal distribution (see \link[complex]{dcnorm});
+\item \code{"dcgnorm"} - complex generalised normal distribution
+(see \link[complex]{dcgnorm}). Its shape parameter is estimated, unless it is provided via
+\code{shape} in the ellipsis. The scale and the pseudo-scale are not estimated by the optimiser:
+the circularity coefficient (pseudo-scale divided by scale) is taken from the moments of
+the residuals and the scale is the maximum likelihood estimate given that coefficient. This is
+exact maximum likelihood only for \code{shape=1}, and an approximation otherwise.
+}}
 
 \item{orders}{vector of orders of complex ARIMA(p,d,q).}
 

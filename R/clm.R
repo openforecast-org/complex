@@ -41,6 +41,16 @@
 #' \code{lossFunction <- function(actual, fitted, B, xreg) return(mean(abs(actual-fitted)))}
 #' \code{loss=lossFunction}
 #'
+#' @param distribution the distribution used in the likelihood, when \code{loss="likelihood"}:
+#' \itemize{
+#' \item \code{"dcnorm"} - complex normal distribution (see \link[complex]{dcnorm});
+#' \item \code{"dcgnorm"} - complex generalised normal distribution
+#' (see \link[complex]{dcgnorm}). Its shape parameter is estimated, unless it is provided via
+#' \code{shape} in the ellipsis. The scale and the pseudo-scale are not estimated by the optimiser:
+#' the circularity coefficient (pseudo-scale divided by scale) is taken from the moments of
+#' the residuals and the scale is the maximum likelihood estimate given that coefficient. This is
+#' exact maximum likelihood only for \code{shape=1}, and an approximation otherwise.
+#' }
 #' @param orders vector of orders of complex ARIMA(p,d,q).
 #' @param scaling NOT YET IMPLEMENTED!!! Defines what type of scaling to do for the variables.
 #' See \link[complex]{cscale} for the explanation of the options.
@@ -55,6 +65,8 @@
 #' \item \code{FI=TRUE} will make the function also produce Fisher Information
 #' matrix, which then can be used to calculated variances of smoothing parameters
 #' and initial states of the model. This is used in the \link[stats]{vcov} method;
+#' \item \code{shape} - the value of the shape parameter of \code{distribution="dcgnorm"}. If
+#' provided, the shape is not estimated;
 #' }
 #'
 #' You can also pass parameters to the optimiser:
@@ -136,6 +148,7 @@
 #' @export clm
 clm <- function(formula, data, subset, na.action,
                 loss=c("likelihood","OLS","CLS","MSE","MAE","HAM"),
+                distribution=c("dcnorm","dcgnorm"),
                 orders=c(0,0,0), scaling=c("normalisation","standardisation","max","none"),
                 parameters=NULL, fast=FALSE, ...){
     # Start measuring the time of calculations
@@ -157,6 +170,10 @@ clm <- function(formula, data, subset, na.action,
     }
 
     scaling <- match.arg(scaling);
+    distribution <- match.arg(distribution);
+    if(distribution=="dcgnorm" && loss!="likelihood"){
+        stop("distribution=\"dcgnorm\" can only be used with loss=\"likelihood\".", call.=FALSE);
+    }
 
     #### Functions used in the estimation ####
     ifelseFast <- function(condition, yes, no){
@@ -257,9 +274,18 @@ clm <- function(formula, data, subset, na.action,
     }
 
     CF <- function(B, loss, y, matrixXreg){
+        # If the shape is estimated, its logarithm is the last element of the real-valued vector
+        shapeValue <- shape;
+        if(shapeEstimate && !is.complex(B) && length(B) %% 2 == 1){
+            shapeValue <- exp(B[length(B)]);
+            B <- B[-length(B)];
+        }
         fitterReturn <- fitter(B, y, matrixXreg);
 
-        if(loss=="likelihood"){
+        if(loss=="likelihood" && distribution=="dcgnorm"){
+            CFValue <- -cgnormConcentrated(y - fitterReturn$mu, shapeValue)$logLik;
+        }
+        else if(loss=="likelihood"){
             # # Concentrated logLik
             CFValue <- obsInsample*(log(2*pi) + 1 + 0.5*log(det(fitterReturn$scale)));
 
@@ -321,6 +347,11 @@ clm <- function(formula, data, subset, na.action,
         # Retransform the vector of parameters into a real-valued one
         BReal <- c(Re(B),Im(B));
         nVariables <- length(BReal);
+        # The logarithm of the shape goes to the end of the vector
+        if(shapeEstimate){
+            BReal <- c(BReal, log(shape));
+            maxeval <- maxeval + 40;
+        }
 
         # Although this is not needed in case of distribution="dnorm", we do that in a way, for the code consistency purposes
         res <- nloptr(BReal, CF,
@@ -329,6 +360,10 @@ clm <- function(formula, data, subset, na.action,
                       # lb=BLower, ub=BUpper,
                       loss=loss, y=y, matrixXreg=matrixXreg);
         BReal[] <- res$solution;
+        shapeValue <- shape;
+        if(shapeEstimate){
+            shapeValue <- exp(BReal[nVariables+1]);
+        }
         B[] <- complex(real=BReal[1:(nVariables/2)],imaginary=BReal[(nVariables/2+1):nVariables]);
         nVariables <- length(B);
         CFValue <- res$objective;
@@ -337,12 +372,31 @@ clm <- function(formula, data, subset, na.action,
             print(res);
         }
 
-        return(list(B=B, CFValue=CFValue));
+        return(list(B=B, CFValue=CFValue, shape=shapeValue));
     }
 
     #### Define the rest of parameters ####
     ellipsis <- list(...);
     # ellipsis <- match.call(expand.dots = FALSE)$`...`;
+
+    # Shape of the complex generalised normal: estimated unless provided
+    shape <- 1;
+    shapeEstimate <- FALSE;
+    if(distribution=="dcgnorm"){
+        if(is.null(ellipsis$shape)){
+            if(!is.null(parameters)){
+                stop("When parameters are provided for distribution=\"dcgnorm\", ",
+                     "the shape needs to be provided as well.", call.=FALSE);
+            }
+            shapeEstimate <- TRUE;
+        }
+        else{
+            shape <- ellipsis$shape;
+            if(shape<=0){
+                stop("The shape should be positive.", call.=FALSE);
+            }
+        }
+    }
 
     # Fisher Information
     if(is.null(ellipsis$FI)){
@@ -861,6 +915,7 @@ clm <- function(formula, data, subset, na.action,
             res <- estimator(B, print_level);
             B <- res$B;
             CFValue <- res$CFValue;
+            shape <- res$shape;
         }
     }
     # If the parameters are provided
@@ -895,6 +950,12 @@ clm <- function(formula, data, subset, na.action,
     mu[] <- fitterReturn$mu;
     scale <- fitterReturn$scale;
     matrixXreg[] <- fitterReturn$matrixXreg;
+    if(distribution=="dcgnorm"){
+        cgnormValues <- cgnormConcentrated(y - mu, shape);
+        scale <- c(scale=cgnormValues$scale, pseudoscale=cgnormValues$pseudoscale);
+        ellipsis$shape <- shape;
+        ellipsis$shapeEstimated <- shapeEstimate;
+    }
 
     #### Produce Fisher Information ####
     if(FI){
@@ -922,7 +983,8 @@ clm <- function(formula, data, subset, na.action,
     ### Error term in the transformed scale
     errors[] <- extractorResiduals(mu, yFitted);
 
-    nParam <- nVariables + (loss=="likelihood")*3/2;
+    # Parameters are counted per series: 3/2 for the covariance matrix, 1/2 for the shape
+    nParam <- nVariables + (loss=="likelihood")*3/2 + shapeEstimate/2;
 
     if(interceptIsNeeded){
         # This shit is needed, because R has habit of converting everything into vectors...
@@ -959,7 +1021,8 @@ clm <- function(formula, data, subset, na.action,
     #### Return the model ####
     finalModel <- structure(list(coefficients=parameters, FI=FI, fitted=yFitted, residuals=as.vector(errors),
                                  mu=mu, scale=scale, logLik=logLik, model=modelName,
-                                 loss=loss, lossFunction=lossFunction, lossValue=CFValue,
+                                 loss=loss, distribution=distribution,
+                                 lossFunction=lossFunction, lossValue=CFValue,
                                  df.residual=obsInsample-nParam, df=nParam, call=cl, rank=nParam,
                                  data=dataWork, terms=dataTerms,
                                  subset=subset, other=ellipsis, B=B,
@@ -1009,7 +1072,7 @@ AICc.clm <- function(object, ...){
     llikelihood <- llikelihood[1:length(llikelihood)];
     nSeries <- 2;
     nParamAll <- 2*nparam(object);
-    nParamPerSeries <- nparam(object) - (nSeries+1)/2;
+    nParamPerSeries <- nparam(object) - (nSeries+1)/2 - isTRUE(object$other$shapeEstimated)/2;
     obs <- nobs(object);
     if(obs - (nParamPerSeries + nSeries + 1) <= 0){
         IC <- Inf;
@@ -1026,7 +1089,7 @@ BICc.clm <- function(object, ...){
     llikelihood <- llikelihood[1:length(llikelihood)];
     nSeries <- 2;
     nParamAll <- 2*nparam(object);
-    nParamPerSeries <- nparam(object) - (nSeries+1)/2;
+    nParamPerSeries <- nparam(object) - (nSeries+1)/2 - isTRUE(object$other$shapeEstimated)/2;
     obs <- nobs(object);
     if(obs - (nParamPerSeries + nSeries + 1) <= 0){
         IC <- Inf;
@@ -1213,6 +1276,11 @@ vcov.clm <- function(object, type=NULL, ...){
         newCall$orders <- object$other$orders;
         newCall$parameters <- c(Re(coef(object)),Im(coef(object)));
         newCall$scale <- object$scale;
+        # The shape of dcgnorm is fixed at its estimate: the Hessian is for B given the shape
+        if(!is.null(object$distribution) && object$distribution=="dcgnorm"){
+            newCall$distribution <- "dcgnorm";
+            newCall$shape <- object$other$shape;
+        }
         newCall$fast <- TRUE;
         newCall$FI <- TRUE;
         # Include bloody ellipsis
@@ -1334,6 +1402,7 @@ summary.clm <- function(object, level=0.95, ...){
         ourReturn$ICs <- ICs;
     }
     ourReturn$loss <- object$loss;
+    ourReturn$distribution <- object$distribution;
     ourReturn$model <- object$model;
     ourReturn$other <- object$other;
     ourReturn$responseName <- formula(object)[[2]];
@@ -1365,6 +1434,11 @@ print.summary.clm <- function(x, ...){
     cat(x$model, "estimated via clm()\n");
     cat(paste0("Response variable: ", paste0(x$responseName,collapse="")));
     cat(paste0("\nLoss function used in estimation: ",x$loss));
+    if(!is.null(x$distribution) && x$distribution=="dcgnorm"){
+        cat(paste0("\nDistribution: complex generalised normal, shape=",
+                   round(x$other$shape,digits),
+                   ifelse(isTRUE(x$other$shapeEstimated), " (estimated)", " (provided)")));
+    }
 
     cat("\nCoefficients:\n");
     stars <- setNames(vector("character",length(x$significance)),

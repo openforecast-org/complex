@@ -49,6 +49,16 @@ Exact MLE of ρ (fixed point wₜ = Qₜ^(β−1), α² = (β/T) Σ wₜ|eₜ|²
 implemented (DECIDED). Document in `?clm` and `?dcgnorm` that the scale/pseudo-scale estimates are
 approximate ML for β ≠ 1: ρ is the moment estimator, the scale is exact ML given ρ.
 
+## Status (2026-09-25)
+
+Phase 0 done (IC fix). Phases 1 and 2 done: `R/cgnorm.R` (dcgnorm, rcgnorm, internal
+cgnormConcentrated), clm(distribution=), shape estimated as log-shape appended to the optimiser
+vector, nparam +0.5, AICc/BICc m excludes the shape, vcov refit fixes the shape (Hessian for B
+given shape, Phase 3 still to do properly), summary prints the shape. Tests in
+tests/testthat/test-cgnorm.R. Remaining: Phase 3 (joint Hessian), Phase 4 (simulated intervals),
+Phase 5 (diagnostic plot), and clm's poor default starting values (found in the wind experiment:
+nested bigger models can end with lower logLik).
+
 ## 3. Implementation phases
 
 Each phase ends with `R CMD build` + `R CMD check --no-manual` clean and its tests passing.

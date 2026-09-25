@@ -31,11 +31,13 @@ export(cpacf)
 export(cplot)
 export(cscale)
 export(cvar)
+export(dcgnorm)
 export(dcnorm)
 export(invert)
 export(mat2complex)
 export(pcnorm)
 export(qcnorm)
+export(rcgnorm)
 export(rcnorm)
 export(vec2complex)
 import(legion)
@@ -94,7 +96,9 @@ importFrom(stats,
   qt,
   resid,
   residuals,
+  rgamma,
   rnorm,
+  runif,
   sd,
   setNames,
   sigma,
