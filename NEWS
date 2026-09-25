@@ -1,3 +1,12 @@
+complex v1.0.3 (development)
+==============
+
+Changes:
+* AIC() and BIC() of clm() now count all real parameters of the model (both parts of the complex variable), as done in multivariate models. nparam() and the degrees of freedom are still per series. Before, the penalty was half of what it should be. Information criteria values change, and so can the orders selected by them.
+* AICc() and BICc() methods for clm() use the multivariate small-sample correction (Bedrick & Tsai, 1994) with two series, as in the legion package. The correction assumes unrestricted multivariate regression, so it is approximate for complex models.
+* Added tests (testthat).
+
+
 complex v1.0.2 (Release data: 2026-02-03)
 ==============
 

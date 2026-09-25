@@ -994,7 +994,47 @@ nparam.clm <- function(object, all=TRUE, ...){
 #' @importFrom stats logLik
 #' @export
 logLik.clm <- function(object, ...){
-    return(structure(object$logLik,nobs=nobs(object),df=nparam(object),class="logLik"));
+    # nparam() counts per series (complex units). The likelihood is the joint one of the
+    # real and imaginary parts, so AIC/BIC need the total number of real parameters.
+    return(structure(object$logLik,nobs=nobs(object),df=2*nparam(object),class="logLik"));
+}
+
+# Multivariate small-sample corrections (Bedrick & Tsai, 1994), as in legion,
+# with two series (real and imaginary parts). nParamPerSeries excludes the share of
+# the covariance matrix (3 real parameters, i.e. 3/2 per series). The correction is
+# derived for unrestricted multivariate regression, so it is approximate for clm.
+#' @export
+AICc.clm <- function(object, ...){
+    llikelihood <- logLik(object);
+    llikelihood <- llikelihood[1:length(llikelihood)];
+    nSeries <- 2;
+    nParamAll <- 2*nparam(object);
+    nParamPerSeries <- nparam(object) - (nSeries+1)/2;
+    obs <- nobs(object);
+    if(obs - (nParamPerSeries + nSeries + 1) <= 0){
+        IC <- Inf;
+    }
+    else{
+        IC <- -2*llikelihood + 2*(obs*nParamAll/(obs - (nParamPerSeries + nSeries + 1)));
+    }
+    return(IC);
+}
+
+#' @export
+BICc.clm <- function(object, ...){
+    llikelihood <- logLik(object);
+    llikelihood <- llikelihood[1:length(llikelihood)];
+    nSeries <- 2;
+    nParamAll <- 2*nparam(object);
+    nParamPerSeries <- nparam(object) - (nSeries+1)/2;
+    obs <- nobs(object);
+    if(obs - (nParamPerSeries + nSeries + 1) <= 0){
+        IC <- Inf;
+    }
+    else{
+        IC <- -2*llikelihood + log(obs)*(obs*nParamAll/(obs - (nParamPerSeries + nSeries + 1)));
+    }
+    return(IC);
 }
 
 #' @rdname clm

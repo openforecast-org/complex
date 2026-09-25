@@ -144,6 +144,8 @@ Proposed fix (Phase 0, separate commit, NEWS entry as a behaviour change):
 
 1. Scale parameterisation (`scale`, `pseudoscale`).
 2. `distribution` argument, as in `alm()`.
-3. IC count: see section 5, fix proposed, awaiting approval of the AICc/BICc form.
+3. IC count: approved and implemented as proposed in section 5 (Phase 0 done, per-series nparam kept,
+   legion-style AICc/BICc). BJsales check: top-3 orders by AICc and BIC unchanged before/after
+   (cARIMA(3,1,2) first; the monograph reported (3,1,1), which is due to package version, not this fix).
 4. No exact-MLE refinement; document the approximation.
 5. Name `dcgnorm` / `rcgnorm`.
