@@ -74,6 +74,8 @@
 #' \item \code{B} - the vector of starting values of parameters for the optimiser,
 #' should correspond to the explanatory variables. If formula for scale was provided,
 #' the parameters for that part should follow the parameters for location;
+#' for \code{distribution="dcgnorm"} with the estimated shape, the starting value of the shape
+#' can be added as the last element of \code{B};
 #' \item \code{algorithm} - the algorithm to use in optimisation
 #' (\code{"NLOPT_LN_SBPLX"} by default);
 #' \item \code{maxeval} - maximum number of evaluations to carry out. Default is 40 per
@@ -912,6 +914,12 @@ clm <- function(formula, data, subset, na.action,
                     B <- c(B, rep(0.1*(1+1i),maOrder));
                 }
             }
+            # For dcgnorm with the estimated shape, B can have one extra element in the end:
+            # the starting value of the shape (its real part)
+            if(shapeEstimate && length(B)==length(parametersNames)+1){
+                shape <- Re(B[length(B)]);
+                B <- B[-length(B)];
+            }
             res <- estimator(B, print_level);
             B <- res$B;
             CFValue <- res$CFValue;
@@ -1108,7 +1116,6 @@ BICc.clm <- function(object, ...){
 #' covariance matrix for the complex error. If \code{NULL} then will return value based
 #' on the loss used in the estimation: OLS -> "conjugate", CLS -> "direct", likelihood ->
 #' "matrix".
-#' @param ... Other parameters passed to internal functions.
 #' @importFrom stats sigma
 #' @export
 sigma.clm <- function(object, type=NULL, ...){
