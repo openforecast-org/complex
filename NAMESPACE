@@ -4,6 +4,7 @@ S3method(AICc,clm)
 S3method(BICc,clm)
 S3method(actuals,clm)
 S3method(confint,clm)
+S3method(forecast,carima)
 S3method(logLik,clm)
 S3method(nobs,clm)
 S3method(nparam,clm)
@@ -12,11 +13,14 @@ S3method(plot,clm)
 S3method(plot,predict.clm)
 S3method(predict,clm)
 S3method(print,cacf)
+S3method(print,carima)
 S3method(print,summary.clm)
 S3method(sigma,clm)
 S3method(summary,clm)
+S3method(vcov,carima)
 S3method(vcov,clm)
 export(cacf)
+export(carima)
 export(ccor)
 export(ccov)
 export(ccov2cor)
@@ -61,6 +65,7 @@ importFrom(greybox,
   AICc,
   BICc,
   actuals,
+  forecast,
   measures,
   nparam,
   xregExpander
@@ -93,6 +98,7 @@ importFrom(stats,
   model.matrix,
   nobs,
   pacf,
+  predict,
   qt,
   resid,
   residuals,
