@@ -216,7 +216,7 @@ clm <- function(formula, data, subset, na.action,
         # If the vector B is not complex then it is estimated in nloptr. Make it complex
         if(!is.complex(B)){
             nVariables <- length(B);
-            B <- complex(real=B[1:(nVariables/2)],imaginary=B[(nVariables/2+1):nVariables]);
+            B <- complex(real=B[seq_len(nVariables/2)],imaginary=B[nVariables/2+seq_len(nVariables/2)]);
         }
 
         # If there is ARIMA, then calculate polynomials
@@ -237,7 +237,8 @@ clm <- function(formula, data, subset, na.action,
                 B <- c(B[1:nVariablesExo], -polyprodcomplex(poly2,poly1)[-1], BMA);
             }
             else{
-                B <- -c(polyprodcomplex(poly2,poly1)[-1], BMA);
+                # Only the ARI polynomial changes sign, not the MA parameters
+                B <- c(-polyprodcomplex(poly2,poly1)[-1], BMA);
             }
         }
 
@@ -355,6 +356,11 @@ clm <- function(formula, data, subset, na.action,
             maxeval <- maxeval + 40;
         }
 
+        # Nothing to estimate (e.g. cARIMA(0,1,0) without intercept): just evaluate the loss
+        if(length(BReal)==0){
+            return(list(B=B, CFValue=CF(B, loss, y, matrixXreg), shape=shape));
+        }
+
         # Although this is not needed in case of distribution="dnorm", we do that in a way, for the code consistency purposes
         res <- nloptr(BReal, CF,
                       opts=list(algorithm=algorithm, xtol_rel=xtol_rel, maxeval=maxeval, print_level=print_level,
@@ -366,7 +372,7 @@ clm <- function(formula, data, subset, na.action,
         if(shapeEstimate){
             shapeValue <- exp(BReal[nVariables+1]);
         }
-        B[] <- complex(real=BReal[1:(nVariables/2)],imaginary=BReal[(nVariables/2+1):nVariables]);
+        B[] <- complex(real=BReal[seq_len(nVariables/2)],imaginary=BReal[nVariables/2+seq_len(nVariables/2)]);
         nVariables <- length(B);
         CFValue <- res$objective;
 
@@ -822,9 +828,14 @@ clm <- function(formula, data, subset, na.action,
         matrixXregForDiffs <- matrixXregForDiffs[-c(1:iOrder),,drop=FALSE];
 
         # Check variability in the new data. Have we removed important observations?
-        noVariability <- apply(matrixXregForDiffs[,-interceptIsNeeded,drop=FALSE]==
-                                   matrix(matrixXregForDiffs[1,-interceptIsNeeded],
-                                          nrow(matrixXregForDiffs),ncol(matrixXregForDiffs)-interceptIsNeeded,
+        # Columns to check: all but the intercept (x[,-FALSE] would select no columns)
+        columnsToCheck <- seq_len(ncol(matrixXregForDiffs));
+        if(interceptIsNeeded){
+            columnsToCheck <- columnsToCheck[-1];
+        }
+        noVariability <- apply(matrixXregForDiffs[,columnsToCheck,drop=FALSE]==
+                                   matrix(matrixXregForDiffs[1,columnsToCheck],
+                                          nrow(matrixXregForDiffs),length(columnsToCheck),
                                           byrow=TRUE),
                                2,all);
         if(any(noVariability)){
@@ -832,7 +843,7 @@ clm <- function(formula, data, subset, na.action,
                     "This might mean that all the variability for them happened ",
                     "in the very beginning of the series. We'll try to fix this, but the model might fail.",
                     call.=FALSE);
-            matrixXregForDiffs[1,which(noVariability)+1] <- rnorm(sum(noVariability));
+            matrixXregForDiffs[1,columnsToCheck[noVariability]] <- rnorm(sum(noVariability));
         }
 
         return(matrixXregForDiffs)
@@ -1528,7 +1539,8 @@ predict.clm <- function(object, newdata=NULL, interval=c("none", "confidence", "
 
         # Split the parameters into normal and polynomial (for ARI)
         if(arOrderUsed || maOrderUsed){
-            parameters <- parameters[1:nParametersExo];
+            # seq_len() rather than 1:n, which would select the first element when n=0
+            parameters <- parameters[seq_len(nParametersExo)];
         }
         parametersNames <- names(parameters);
 
@@ -1622,9 +1634,12 @@ predict.clm <- function(object, newdata=NULL, interval=c("none", "confidence", "
             matrixOfxreg <- matrixOfxreg[,parametersNames,drop=FALSE];
         }
         else{
-            matrixOfxreg <- matrix(1, h, 1);
             if(interceptIsNeeded){
+                matrixOfxreg <- matrix(1, h, 1);
                 colnames(matrixOfxreg) <- "(Intercept)";
+            }
+            else{
+                matrixOfxreg <- matrix(0, h, 0);
             }
         }
     }

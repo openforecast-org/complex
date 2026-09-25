@@ -3,10 +3,17 @@ complex v1.0.3 (Release data: 2026-09-25)
 
 Changes:
 * dcgnorm() and rcgnorm() - density and random generation for the complex generalised normal distribution (complex generalised Gaussian), with scale, pseudo-scale and shape.
-* clm() has a new argument distribution. distribution="dcgnorm" uses the complex generalised normal likelihood, with the shape estimated (or provided via shape=...). The scale and the pseudo-scale are concentrated out: the circularity coefficient comes from the moments of the residuals and the scale is the ML estimate given it (approximate ML when shape is not 1). Standard errors are for the parameters given the shape.
+* clm() has a new argument distribution. distribution="dcgnorm" uses the complex generalised normal likelihood, with the shape estimated (or provided via shape=..., with the starting value as the last element of B). The scale and the pseudo-scale are concentrated out: the circularity coefficient comes from the moments of the residuals and the scale is the ML estimate given it (approximate ML when shape is not 1). Standard errors are for the parameters given the shape.
 * AIC() and BIC() of clm() now count all real parameters of the model (both parts of the complex variable), as done in multivariate models. nparam() and the degrees of freedom are still per series. Before, the penalty was half of what it should be. Information criteria values change, and so can the orders selected by them.
 * AICc() and BICc() methods for clm() use the multivariate small-sample correction (Bedrick & Tsai, 1994) with two series, as in the legion package. The correction assumes unrestricted multivariate regression, so it is approximate for complex models.
 * Added tests (testthat).
+
+Bugfixes:
+* clm() without intercept (e.g. y~-1) and with MA terms flipped the sign of the MA parameters (the likelihood was correct, the reported parameters and forecasts were not).
+* predict.clm() for cARIMA without intercept used the first parameter as an intercept (1:0 indexing).
+* clm() without intercept and with AR terms failed in the check of variability of differenced data.
+* clm() with nothing to estimate (e.g. cARIMA(0,1,0) without intercept) failed in the optimiser.
+* The documentation of the ellipsis in clm() was hidden by the one of sigma.clm().
 
 
 complex v1.0.2 (Release data: 2026-02-03)
