@@ -1,8 +1,8 @@
 Package: complex
 Type: Package
 Title: Time Series Analysis and Forecasting Using Complex Variables
-Version: 1.0.2
-Date: 2026-02-03
+Version: 1.0.3
+Date: 2026-09-25
 Authors@R: person("Ivan", "Svetunkov", email = "ivan@svetunkov.com", role = c("aut", "cre"),
                   comment="Lecturer at Centre for Marketing Analytics and Forecasting, Lancaster University, UK")
 URL: https://github.com/config-i1/complex
@@ -27,6 +27,6 @@ Suggests:
     testthat,
     knitr,
     rmarkdown
-RoxygenNote: 7.3.2
 Encoding: UTF-8
 Roxygen: list(old_usage = TRUE)
+Config/roxygen2/version: 8.1.0
