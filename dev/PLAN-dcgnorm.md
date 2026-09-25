@@ -25,10 +25,11 @@ shape β > 0. For e = z − μ:
   complex generalized Gaussian of Novey, Adalı & Roy (2010, IEEE TSP 58(3)) under the
   `cnorm.R` mapping Σ = ½[[α²+Re ψ², Im ψ²],[Im ψ², α²−Re ψ²]].
 
-**Parameterisation decision (to confirm):** user-facing functions take `sigma2`, `varsigma2`
-(variance and pseudo-variance, as in `dcnorm`) plus `shape`, and convert internally with k(β).
-This keeps `sigma.clm()` meaningful and `dcgnorm(shape=1)` == `dcnorm`. Alternative: expose
-`scale2`/`pseudoscale2` directly. Recommendation: variance parameterisation.
+**Parameterisation (DECIDED):** scale parameterisation. Functions take `scale` (α², real) and
+`pseudoscale` (ψ², complex) plus `shape` (β). The closed form is simplest in the scale (section 2);
+the variance form only adds the factor k(β). At shape = 1, scale = σ² and pseudoscale = ς², so
+`dcgnorm(q, mu, scale=s, pseudoscale=p, shape=1)` == `dcnorm(q, mu, sigma2=s, varsigma2=p)`.
+`sigma.clm()` keeps returning the covariance of residuals; `object$scale` holds (α², ψ²) for dcgnorm.
 
 ## 2. Concentrated likelihood (closed form)
 
@@ -44,10 +45,9 @@ Write ψ² = ρ α², ρ the complex circularity coefficient (|ρ| < 1).
 Prototype check (T = 20,000, β = 0.5, α² = 2, ψ² = 0.6+0.8i): closed form ℓ = −101981.6 vs
 full numeric MLE −101981.5; the β that maximises the closed-form likelihood is 0.50.
 
-Optional exact-MLE refinement (argument `refine`, default 0): n fixed-point steps
-wₜ = Qₜ^(β−1), α² = (β/T) Σ wₜ|eₜ|², ψ² = (β/T) Σ wₜ eₜ², then recompute ℓ with the full
-density. Still closed-form arithmetic; the optimiser sees only β. Convergence is proven for
-β ≤ 1 (Pascal et al., 2013); for β > 1 cap the iterations and fall back to step 2.
+Exact MLE of ρ (fixed point wₜ = Qₜ^(β−1), α² = (β/T) Σ wₜ|eₜ|², ψ² = (β/T) Σ wₜ eₜ²) is NOT
+implemented (DECIDED). Document in `?clm` and `?dcgnorm` that the scale/pseudo-scale estimates are
+approximate ML for β ≠ 1: ρ is the moment estimator, the scale is exact ML given ρ.
 
 ## 3. Implementation phases
 
@@ -55,22 +55,23 @@ Each phase ends with `R CMD build` + `R CMD check --no-manual` clean and its tes
 Commit per phase.
 
 ### Phase 1 — distribution functions (`R/cgnorm.R`, new)
-- `dcgnorm(q, mu=0, sigma2=1, varsigma2=0, shape=1, log=FALSE)`. Default shape 1 = normal.
+- `dcgnorm(q, mu=0, scale=1, pseudoscale=0, shape=1, log=FALSE)`. Default shape 1 = normal.
   In greybox `dgnorm` shape 2 = normal (exponent on |x|, not on the quadratic form); document
   that shape here equals greybox shape / 2.
-- `rcgnorm(n, mu, sigma2, varsigma2, shape)` via the Gamma radial law and a uniform angle.
-- Internal helper `cgnormScale(sigma2, varsigma2, shape)` returning (α², ψ²), and its inverse.
-- Validate: sigma2 > 0, |varsigma2| < sigma2, shape > 0.
+- `rcgnorm(n, mu, scale, pseudoscale, shape)` via the Gamma radial law and a uniform angle.
+- Exported helper or documented formula k(β) to convert scale to covariance.
+- Validate: scale > 0, |pseudoscale| < scale, shape > 0.
 - No `p`/`q` functions in this release (no closed form; `qcnorm` semantics are unusual anyway).
 - Roxygen docs in the `cnormal` style; export; NAMESPACE via roxygen.
 
 ### Phase 2 — `clm()` estimation (`R/clm.R`)
-- New argument `distribution = c("dcnorm", "dcgnorm")`, used only when `loss = "likelihood"`.
-  Default keeps current behaviour exactly.
-- Shape: pass via `...` as `shape` (NULL = estimate, number = fix), mirroring greybox `alm()`
-  handling of `other`. Returned in `object$other$shape`.
+- New argument `distribution = c("dcnorm", "dcgnorm")` (DECIDED), as in greybox `alm()`: the
+  distribution defines the likelihood used when `loss = "likelihood"`. Default keeps current
+  behaviour exactly.
+- Shape: as `alm()` does for `dgnorm`: user may fix it via `...` (`shape=`), otherwise estimated.
+  Returned in `object$other$shape`.
 - `fitter()` (≈ lines 195–247): for `dcgnorm`, compute ρ̂, α̂², ψ̂² as in section 2 and return
-  `scale` as the 2×2 covariance (via k(β)), so downstream code keeps its meaning.
+  them as `scale`. Check every downstream use of `object$scale` (vcov refit passes it back in).
 - Parameter vector: append ONE real parameter log β at the end of `BReal` in `estimator()`
   (≈ lines 307–341) and strip it BEFORE the real/imaginary split in `fitter()` (lines 197–201),
   which currently assumes every entry is half of a complex coefficient. Update `maxeval`.
@@ -111,12 +112,38 @@ Commit per phase.
 7. Regression: every existing example in the docs gives unchanged results with the default
    `distribution`.
 
-## 5. Open questions for the author
+## 5. Information criteria: parameter count (found while planning, affects master too)
 
-1. Variance parameterisation (recommended) or scale parameterisation for `dcgnorm`?
-2. `distribution` as a new argument (recommended) or extend `loss` values (e.g. `"likelihood-cgn"`)?
-3. Parameter counting: `nparam` counts complex units (one complex coefficient = 1, Σ = 1.5).
-   AIC/AICc of `clm` therefore penalise half the real-parameter count. Keep the convention (and
-   document it) or switch to real counts? This affects comparing cARIMA with real VAR by IC.
-4. Ship `refine` (exact MLE of ρ) in the first version or later?
-5. Name: `dcgnorm` (parallel to greybox `dgnorm`) — confirm.
+Check (cAR(1) example from the monograph, T = 80):
+- `logLik.clm` is the FULL bivariate log-likelihood, −T(log 2π + 1 + ½ log det Σ̂) (−389.60).
+- `nparam.clm` returns `object$rank` = `nVariables + 3/2` = 3.5, i.e. real parameters / 2
+  (2 intercept + 2 AR + 3 Σ = 7 real). Commented-out code in `nparam.clm` says
+  "Divide by two, because we calculate df per series".
+- `AIC`/`BIC` (stats, via `logLik` df attr) and `AICc`/`BICc` (greybox `.default`, via `nparam`)
+  all use 3.5. AIC = −2ℓ + 7 = 786.21; with all 7 real parameters it is −2ℓ + 14 = 793.21.
+- For comparison greybox's own `AICc.varest` counts ALL real parameters of a VAR in the penalty,
+  K·m + K(K+1)/2 (coefficients of all equations plus Σ), and uses the per-equation count m only in
+  the small-sample denominator (Bedrick & Tsai 1994): −2ℓ + 2T(Km + K(K+1)/2)/(T − m − K − 1).
+  (`vars::logLik.varest` reports df = 6 for this VAR(1), omitting Σ; do not compare to it blindly.)
+
+Conclusion: the per-series count (3.5) is right for `df.residual` (each series has T obs and
+3.5 parameters per series), but with a joint bivariate log-likelihood the AIC/BIC penalty needs
+the total real count (7). The current values under-penalise by half, so AIC-based order
+selection favours bigger cARIMA models, and IC comparison with real-valued VAR favours cARIMA.
+
+Proposed fix (Phase 0, separate commit, NEWS entry as a behaviour change):
+- Keep `nparam.clm` / `df.residual` per series (no change to t-based inference).
+- `logLik.clm`: `df = 2*nparam(object)` so stats `AIC`/`BIC` use the total real count.
+- New `AICc.clm`, `BICc.clm` in the `AICc.varest` style with K = 2, k = 2*nparam(object) and
+  m = nparam(object) − (Σ and shape share) in the denominator. The exact small-sample
+  correction for the complex (restricted) model is not derived anywhere; decide the form of m.
+- dcgnorm: β adds 1 real parameter (0.5 in the per-series count).
+- Re-run the monograph examples: selected orders may change (BJsales chose cARIMA(3,1,1)).
+
+## 6. Decisions (2026-09-25)
+
+1. Scale parameterisation (`scale`, `pseudoscale`).
+2. `distribution` argument, as in `alm()`.
+3. IC count: see section 5, fix proposed, awaiting approval of the AICc/BICc form.
+4. No exact-MLE refinement; document the approximation.
+5. Name `dcgnorm` / `rcgnorm`.
