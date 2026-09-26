@@ -16,6 +16,7 @@ Bugfixes:
 * predict.clm() for cARIMA without intercept used the first parameter as an intercept (1:0 indexing).
 * clm() without intercept and with AR terms failed in the check of variability of differenced data.
 * clm() with d=0, no intercept and no AR (e.g. cARIMA(0,0,q) with y~-1) selected the first column for the starting values (1:0 indexing) and failed.
+* clm() with loss="CLS" and MA terms failed with an unclear error from the optimiser. It now stops with an explanation (the CLS loss is complex-valued and cannot be minimised numerically).
 * clm() with nothing to estimate (e.g. cARIMA(0,1,0) without intercept) failed in the optimiser.
 * The documentation of the ellipsis in clm() was hidden by the one of sigma.clm().
 

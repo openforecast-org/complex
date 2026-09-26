@@ -49,8 +49,10 @@ test_that("cARIMA(0,0,q) without intercept can be estimated", {
     set.seed(4)
     e <- rcnorm(500, 0, sigma2=1, varsigma2=0.3)
     y <- e + c(0, (0.5-0.2i)*e[-500])
-    for(loss in c("likelihood", "OLS", "CLS")){
+    for(loss in c("likelihood", "OLS")){
         model <- suppressWarnings(clm(y~-1, data.frame(y=y), orders=c(0,0,1), loss=loss))
         expect_equal(unname(coef(model)), 0.5-0.2i, tolerance=0.1)
     }
+    # CLS is complex-valued and cannot be used in the numeric optimisation needed for MA
+    expect_error(clm(y~-1, data.frame(y=y), orders=c(0,0,1), loss="CLS"), "cannot be used with MA")
 })

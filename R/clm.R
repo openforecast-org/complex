@@ -173,6 +173,11 @@ clm <- function(formula, data, subset, na.action,
 
     scaling <- match.arg(scaling);
     distribution <- match.arg(distribution);
+    if(loss=="CLS" && length(orders)==3 && orders[3]!=0){
+        stop("loss=\"CLS\" cannot be used with MA terms: the parameters then need to be estimated ",
+             "numerically, while the CLS loss is complex-valued. Use loss=\"OLS\" or \"likelihood\".",
+             call.=FALSE);
+    }
     if(distribution=="dcgnorm" && loss!="likelihood"){
         stop("distribution=\"dcgnorm\" can only be used with loss=\"likelihood\".", call.=FALSE);
     }
