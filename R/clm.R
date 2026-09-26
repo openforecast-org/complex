@@ -41,6 +41,16 @@
 #' \code{lossFunction <- function(actual, fitted, B, xreg) return(mean(abs(actual-fitted)))}
 #' \code{loss=lossFunction}
 #'
+#' @param distribution the distribution used in the likelihood, when \code{loss="likelihood"}:
+#' \itemize{
+#' \item \code{"dcnorm"} - complex normal distribution (see \link[complex]{dcnorm});
+#' \item \code{"dcgnorm"} - complex generalised normal distribution
+#' (see \link[complex]{dcgnorm}). Its shape parameter is estimated, unless it is provided via
+#' \code{shape} in the ellipsis. The scale and the pseudo-scale are not estimated by the optimiser:
+#' the circularity coefficient (pseudo-scale divided by scale) is taken from the moments of
+#' the residuals and the scale is the maximum likelihood estimate given that coefficient. This is
+#' exact maximum likelihood only for \code{shape=1}, and an approximation otherwise.
+#' }
 #' @param orders vector of orders of complex ARIMA(p,d,q).
 #' @param scaling NOT YET IMPLEMENTED!!! Defines what type of scaling to do for the variables.
 #' See \link[complex]{cscale} for the explanation of the options.
@@ -48,13 +58,19 @@
 #' is estimated.
 #' @param fast if \code{TRUE}, then the function won't check whether
 #' the data has variability and whether the regressors are correlated. Might
-#' cause trouble, especially in cases of multicollinearity.
+#' cause trouble, especially in cases of multicollinearity. In case of cARIMA without explanatory
+#' variables (the intercept is allowed), \code{fast=TRUE} also makes the function use the
+#' Hannan-Rissanen estimates (Hannan & Rissanen, 1982) of the AR and MA parameters as the starting
+#' values of the optimiser (and, for \code{distribution="dcgnorm"}, the shape that maximises the
+#' likelihood of their residuals), instead of the default ones.
 #' @param ... additional parameters to pass to distribution functions. This
 #' includes:
 #' \itemize{
 #' \item \code{FI=TRUE} will make the function also produce Fisher Information
 #' matrix, which then can be used to calculated variances of smoothing parameters
 #' and initial states of the model. This is used in the \link[stats]{vcov} method;
+#' \item \code{shape} - the value of the shape parameter of \code{distribution="dcgnorm"}. If
+#' provided, the shape is not estimated;
 #' }
 #'
 #' You can also pass parameters to the optimiser:
@@ -62,6 +78,8 @@
 #' \item \code{B} - the vector of starting values of parameters for the optimiser,
 #' should correspond to the explanatory variables. If formula for scale was provided,
 #' the parameters for that part should follow the parameters for location;
+#' for \code{distribution="dcgnorm"} with the estimated shape, the starting value of the shape
+#' can be added as the last element of \code{B};
 #' \item \code{algorithm} - the algorithm to use in optimisation
 #' (\code{"NLOPT_LN_SBPLX"} by default);
 #' \item \code{maxeval} - maximum number of evaluations to carry out. Default is 40 per
@@ -136,6 +154,7 @@
 #' @export clm
 clm <- function(formula, data, subset, na.action,
                 loss=c("likelihood","OLS","CLS","MSE","MAE","HAM"),
+                distribution=c("dcnorm","dcgnorm"),
                 orders=c(0,0,0), scaling=c("normalisation","standardisation","max","none"),
                 parameters=NULL, fast=FALSE, ...){
     # Start measuring the time of calculations
@@ -157,6 +176,15 @@ clm <- function(formula, data, subset, na.action,
     }
 
     scaling <- match.arg(scaling);
+    distribution <- match.arg(distribution);
+    if(loss=="CLS" && length(orders)==3 && orders[3]!=0){
+        stop("loss=\"CLS\" cannot be used with MA terms: the parameters then need to be estimated ",
+             "numerically, while the CLS loss is complex-valued. Use loss=\"OLS\" or \"likelihood\".",
+             call.=FALSE);
+    }
+    if(distribution=="dcgnorm" && loss!="likelihood"){
+        stop("distribution=\"dcgnorm\" can only be used with loss=\"likelihood\".", call.=FALSE);
+    }
 
     #### Functions used in the estimation ####
     ifelseFast <- function(condition, yes, no){
@@ -197,7 +225,7 @@ clm <- function(formula, data, subset, na.action,
         # If the vector B is not complex then it is estimated in nloptr. Make it complex
         if(!is.complex(B)){
             nVariables <- length(B);
-            B <- complex(real=B[1:(nVariables/2)],imaginary=B[(nVariables/2+1):nVariables]);
+            B <- complex(real=B[seq_len(nVariables/2)],imaginary=B[nVariables/2+seq_len(nVariables/2)]);
         }
 
         # If there is ARIMA, then calculate polynomials
@@ -218,7 +246,8 @@ clm <- function(formula, data, subset, na.action,
                 B <- c(B[1:nVariablesExo], -polyprodcomplex(poly2,poly1)[-1], BMA);
             }
             else{
-                B <- -c(polyprodcomplex(poly2,poly1)[-1], BMA);
+                # Only the ARI polynomial changes sign, not the MA parameters
+                B <- c(-polyprodcomplex(poly2,poly1)[-1], BMA);
             }
         }
 
@@ -257,9 +286,39 @@ clm <- function(formula, data, subset, na.action,
     }
 
     CF <- function(B, loss, y, matrixXreg){
+        # If the shape is estimated, its logarithm is the last element of the real-valued vector
+        shapeValue <- shape;
+        if(shapeEstimate && !is.complex(B) && length(B) %% 2 == 1){
+            shapeValue <- exp(B[length(B)]);
+            B <- B[-length(B)];
+        }
+
+        # Stationarity (AR) and invertibility (MA) conditions: all roots of the complex polynomials
+        # should lie outside the unit circle. The differencing polynomial is not checked.
+        # The check is skipped if the vector of parameters does not match the orders (this happens
+        # in the re-estimation done by vcov.clm, where the MA columns are passed as regressors)
+        if((arOrder>0 || maOrder>0) &&
+           (ifelse(is.complex(B), length(B), length(B)/2) == nVariablesExo+arOrder+maOrder)){
+            if(is.complex(B)){
+                BComplex <- B;
+            }
+            else{
+                BComplex <- complex(real=B[seq_len(length(B)/2)],
+                                    imaginary=B[length(B)/2+seq_len(length(B)/2)]);
+            }
+            rootsModuli <- c(if(arOrder>0) Mod(polyroot(c(1, -BComplex[nVariablesExo+seq_len(arOrder)]))),
+                             if(maOrder>0) Mod(polyroot(c(1, BComplex[nVariablesExo+arOrder+seq_len(maOrder)]))));
+            if(any(rootsModuli<=1)){
+                return(1/min(rootsModuli)*1E+100);
+            }
+        }
+
         fitterReturn <- fitter(B, y, matrixXreg);
 
-        if(loss=="likelihood"){
+        if(loss=="likelihood" && distribution=="dcgnorm"){
+            CFValue <- -cgnormConcentrated(y - fitterReturn$mu, shapeValue)$logLik;
+        }
+        else if(loss=="likelihood"){
             # # Concentrated logLik
             CFValue <- obsInsample*(log(2*pi) + 1 + 0.5*log(det(fitterReturn$scale)));
 
@@ -321,6 +380,16 @@ clm <- function(formula, data, subset, na.action,
         # Retransform the vector of parameters into a real-valued one
         BReal <- c(Re(B),Im(B));
         nVariables <- length(BReal);
+        # The logarithm of the shape goes to the end of the vector
+        if(shapeEstimate){
+            BReal <- c(BReal, log(shape));
+            maxeval <- maxeval + 40;
+        }
+
+        # Nothing to estimate (e.g. cARIMA(0,1,0) without intercept): just evaluate the loss
+        if(length(BReal)==0){
+            return(list(B=B, CFValue=CF(B, loss, y, matrixXreg), shape=shape));
+        }
 
         # Although this is not needed in case of distribution="dnorm", we do that in a way, for the code consistency purposes
         res <- nloptr(BReal, CF,
@@ -329,7 +398,11 @@ clm <- function(formula, data, subset, na.action,
                       # lb=BLower, ub=BUpper,
                       loss=loss, y=y, matrixXreg=matrixXreg);
         BReal[] <- res$solution;
-        B[] <- complex(real=BReal[1:(nVariables/2)],imaginary=BReal[(nVariables/2+1):nVariables]);
+        shapeValue <- shape;
+        if(shapeEstimate){
+            shapeValue <- exp(BReal[nVariables+1]);
+        }
+        B[] <- complex(real=BReal[seq_len(nVariables/2)],imaginary=BReal[nVariables/2+seq_len(nVariables/2)]);
         nVariables <- length(B);
         CFValue <- res$objective;
 
@@ -337,12 +410,31 @@ clm <- function(formula, data, subset, na.action,
             print(res);
         }
 
-        return(list(B=B, CFValue=CFValue));
+        return(list(B=B, CFValue=CFValue, shape=shapeValue));
     }
 
     #### Define the rest of parameters ####
     ellipsis <- list(...);
     # ellipsis <- match.call(expand.dots = FALSE)$`...`;
+
+    # Shape of the complex generalised normal: estimated unless provided
+    shape <- 1;
+    shapeEstimate <- FALSE;
+    if(distribution=="dcgnorm"){
+        if(is.null(ellipsis$shape)){
+            if(!is.null(parameters)){
+                stop("When parameters are provided for distribution=\"dcgnorm\", ",
+                     "the shape needs to be provided as well.", call.=FALSE);
+            }
+            shapeEstimate <- TRUE;
+        }
+        else{
+            shape <- ellipsis$shape;
+            if(shape<=0){
+                stop("The shape should be positive.", call.=FALSE);
+            }
+        }
+    }
 
     # Fisher Information
     if(is.null(ellipsis$FI)){
@@ -766,9 +858,14 @@ clm <- function(formula, data, subset, na.action,
         matrixXregForDiffs <- matrixXregForDiffs[-c(1:iOrder),,drop=FALSE];
 
         # Check variability in the new data. Have we removed important observations?
-        noVariability <- apply(matrixXregForDiffs[,-interceptIsNeeded,drop=FALSE]==
-                                   matrix(matrixXregForDiffs[1,-interceptIsNeeded],
-                                          nrow(matrixXregForDiffs),ncol(matrixXregForDiffs)-interceptIsNeeded,
+        # Columns to check: all but the intercept (x[,-FALSE] would select no columns)
+        columnsToCheck <- seq_len(ncol(matrixXregForDiffs));
+        if(interceptIsNeeded){
+            columnsToCheck <- columnsToCheck[-1];
+        }
+        noVariability <- apply(matrixXregForDiffs[,columnsToCheck,drop=FALSE]==
+                                   matrix(matrixXregForDiffs[1,columnsToCheck],
+                                          nrow(matrixXregForDiffs),length(columnsToCheck),
                                           byrow=TRUE),
                                2,all);
         if(any(noVariability)){
@@ -776,7 +873,7 @@ clm <- function(formula, data, subset, na.action,
                     "This might mean that all the variability for them happened ",
                     "in the very beginning of the series. We'll try to fix this, but the model might fail.",
                     call.=FALSE);
-            matrixXregForDiffs[1,which(noVariability)+1] <- rnorm(sum(noVariability));
+            matrixXregForDiffs[1,columnsToCheck[noVariability]] <- rnorm(sum(noVariability));
         }
 
         return(matrixXregForDiffs)
@@ -786,14 +883,31 @@ clm <- function(formula, data, subset, na.action,
     # if(scaling!="none"){
     # }
 
+    # Hannan-Rissanen starting values for pure cARIMA with fast=TRUE (NULL if not applicable or failed)
+    hrStart <- function(){
+        if(!(fast && arimaModel && (arOrder>0 || maOrder>0) && (nVariablesExo-interceptIsNeeded)==0)){
+            return(NULL);
+        }
+        u <- as.vector(if(iOrder>0) diff(y, differences=iOrder) else y);
+        estimates <- tryCatch(hannanRissanen(u, arOrder, maOrder, interceptIsNeeded),
+                              error=function(e) NULL);
+        if(is.null(estimates)){
+            return(NULL);
+        }
+        arValues <- hrAdmissible(estimates$ar, -1);
+        maValues <- hrAdmissible(estimates$ma, 1);
+        return(list(B=c(estimates$constant, arValues, maValues),
+                    residuals=armaResiduals(u, estimates$constant, arValues, maValues)));
+    }
+
     #### Estimate parameters of the model ####
     if(is.null(parameters)){
         if(loss=="CLS"){
             # If this is d=0 model
             if(iOrder==0){
-                B <- as.vector(invert(t(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*%
-                                          matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*%
-                                   t(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*% y);
+                B <- as.vector(invert(t(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*%
+                                          matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*%
+                                   t(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*% y);
             }
             else{
                 matrixXregForDiffs <- iModelDesign();
@@ -815,9 +929,9 @@ clm <- function(formula, data, subset, na.action,
         else if(loss=="OLS"){
             # If this is d=0 model
             if(iOrder==0){
-                B <- as.vector(invert(t(Conj(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE])) %*%
-                                          matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*%
-                                   t(Conj(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE])) %*% y);
+                B <- as.vector(invert(t(Conj(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE])) %*%
+                                          matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*%
+                                   t(Conj(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE])) %*% y);
             }
             else{
                 matrixXregForDiffs <- iModelDesign();
@@ -827,6 +941,10 @@ clm <- function(formula, data, subset, na.action,
             if(maOrderUsed){
                 # Add initial values for the maOrder
                 B <- c(B, rep(0.1*(1+1i),maOrder));
+                hrValues <- hrStart();
+                if(!is.null(hrValues)){
+                    B <- hrValues$B;
+                }
                 # Estimate the model
                 res <- estimator(B, print_level);
                 B <- res$B;
@@ -841,12 +959,22 @@ clm <- function(formula, data, subset, na.action,
             # 1. paramExo,
             # 2. paramAR,
             # 3. paramMA.
-            if(is.null(B)){
+            hrValues <- if(is.null(B)) hrStart() else NULL;
+            if(!is.null(hrValues)){
+                B <- hrValues$B;
+                # The shape that maximises the likelihood of the Hannan-Rissanen residuals
+                if(shapeEstimate){
+                    hrResiduals <- hrValues$residuals[!is.na(hrValues$residuals)];
+                    shape <- exp(optimize(function(logShape) cgnormConcentrated(hrResiduals, exp(logShape))$logLik,
+                                          c(log(0.05), log(20)), maximum=TRUE)$maximum);
+                }
+            }
+            else if(is.null(B)){
                 # If this is d=0 model
                 if(iOrder==0){
-                    B <- as.vector(invert(t(Conj(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE])) %*%
-                                              matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*%
-                                       t(Conj(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE])) %*% y);
+                    B <- as.vector(invert(t(Conj(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE])) %*%
+                                              matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*%
+                                       t(Conj(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE])) %*% y);
                 }
                 else{
                     matrixXregForDiffs <- iModelDesign();
@@ -858,9 +986,16 @@ clm <- function(formula, data, subset, na.action,
                     B <- c(B, rep(0.1*(1+1i),maOrder));
                 }
             }
+            # For dcgnorm with the estimated shape, B can have one extra element in the end:
+            # the starting value of the shape (its real part)
+            if(shapeEstimate && length(B)==length(parametersNames)+1){
+                shape <- Re(B[length(B)]);
+                B <- B[-length(B)];
+            }
             res <- estimator(B, print_level);
             B <- res$B;
             CFValue <- res$CFValue;
+            shape <- res$shape;
         }
     }
     # If the parameters are provided
@@ -895,6 +1030,12 @@ clm <- function(formula, data, subset, na.action,
     mu[] <- fitterReturn$mu;
     scale <- fitterReturn$scale;
     matrixXreg[] <- fitterReturn$matrixXreg;
+    if(distribution=="dcgnorm"){
+        cgnormValues <- cgnormConcentrated(y - mu, shape);
+        scale <- c(scale=cgnormValues$scale, pseudoscale=cgnormValues$pseudoscale);
+        ellipsis$shape <- shape;
+        ellipsis$shapeEstimated <- shapeEstimate;
+    }
 
     #### Produce Fisher Information ####
     if(FI){
@@ -922,7 +1063,8 @@ clm <- function(formula, data, subset, na.action,
     ### Error term in the transformed scale
     errors[] <- extractorResiduals(mu, yFitted);
 
-    nParam <- nVariables + (loss=="likelihood")*3/2;
+    # Parameters are counted per series: 3/2 for the covariance matrix, 1/2 for the shape
+    nParam <- nVariables + (loss=="likelihood")*3/2 + shapeEstimate/2;
 
     if(interceptIsNeeded){
         # This shit is needed, because R has habit of converting everything into vectors...
@@ -959,7 +1101,8 @@ clm <- function(formula, data, subset, na.action,
     #### Return the model ####
     finalModel <- structure(list(coefficients=parameters, FI=FI, fitted=yFitted, residuals=as.vector(errors),
                                  mu=mu, scale=scale, logLik=logLik, model=modelName,
-                                 loss=loss, lossFunction=lossFunction, lossValue=CFValue,
+                                 loss=loss, distribution=distribution,
+                                 lossFunction=lossFunction, lossValue=CFValue,
                                  df.residual=obsInsample-nParam, df=nParam, call=cl, rank=nParam,
                                  data=dataWork, terms=dataTerms,
                                  subset=subset, other=ellipsis, B=B,
@@ -994,7 +1137,50 @@ nparam.clm <- function(object, all=TRUE, ...){
 #' @importFrom stats logLik
 #' @export
 logLik.clm <- function(object, ...){
-    return(structure(object$logLik,nobs=nobs(object),df=nparam(object),class="logLik"));
+    # nparam() counts per series (complex units). The likelihood is the joint one of the
+    # real and imaginary parts, so AIC/BIC need the total number of real parameters.
+    return(structure(object$logLik,nobs=nobs(object),df=2*nparam(object),class="logLik"));
+}
+
+# Multivariate small-sample corrections (Bedrick & Tsai, 1994), as in legion,
+# with two series (real and imaginary parts). The correction is derived for unrestricted
+# multivariate regression, so it is approximate for clm.
+#' @export
+AICc.clm <- function(object, ...){
+    return(clmIC(logLik(object), nparam(object), nobs(object),
+                 isTRUE(object$other$shapeEstimated), "AICc"));
+}
+
+#' @export
+BICc.clm <- function(object, ...){
+    return(clmIC(logLik(object), nparam(object), nobs(object),
+                 isTRUE(object$other$shapeEstimated), "BICc"));
+}
+
+# Information criteria of clm given the log-likelihood, the number of parameters per series
+# (as returned by nparam.clm) and the number of observations.
+# All real parameters (2*nParam) are counted in the penalty. For AICc/BICc, the number of
+# parameters per series excludes the share of the covariance matrix (3/2) and of the shape (1/2).
+clmIC <- function(llikelihood, nParam, obs, shapeEstimated=FALSE, ic=c("AIC","AICc","BIC","BICc")){
+    ic <- match.arg(ic);
+    llikelihood <- as.numeric(llikelihood);
+    nSeries <- 2;
+    nParamAll <- 2*nParam;
+    nParamPerSeries <- nParam - (nSeries+1)/2 - shapeEstimated/2;
+    if(ic=="AIC"){
+        return(-2*llikelihood + 2*nParamAll);
+    }
+    if(ic=="BIC"){
+        return(-2*llikelihood + log(obs)*nParamAll);
+    }
+    if(obs - (nParamPerSeries + nSeries + 1) <= 0){
+        return(Inf);
+    }
+    penalty <- obs*nParamAll/(obs - (nParamPerSeries + nSeries + 1));
+    if(ic=="AICc"){
+        return(-2*llikelihood + 2*penalty);
+    }
+    return(-2*llikelihood + log(obs)*penalty);
 }
 
 #' @rdname clm
@@ -1005,7 +1191,6 @@ logLik.clm <- function(object, ...){
 #' covariance matrix for the complex error. If \code{NULL} then will return value based
 #' on the loss used in the estimation: OLS -> "conjugate", CLS -> "direct", likelihood ->
 #' "matrix".
-#' @param ... Other parameters passed to internal functions.
 #' @importFrom stats sigma
 #' @export
 sigma.clm <- function(object, type=NULL, ...){
@@ -1173,6 +1358,11 @@ vcov.clm <- function(object, type=NULL, ...){
         newCall$orders <- object$other$orders;
         newCall$parameters <- c(Re(coef(object)),Im(coef(object)));
         newCall$scale <- object$scale;
+        # The shape of dcgnorm is fixed at its estimate: the Hessian is for B given the shape
+        if(!is.null(object$distribution) && object$distribution=="dcgnorm"){
+            newCall$distribution <- "dcgnorm";
+            newCall$shape <- object$other$shape;
+        }
         newCall$fast <- TRUE;
         newCall$FI <- TRUE;
         # Include bloody ellipsis
@@ -1294,6 +1484,7 @@ summary.clm <- function(object, level=0.95, ...){
         ourReturn$ICs <- ICs;
     }
     ourReturn$loss <- object$loss;
+    ourReturn$distribution <- object$distribution;
     ourReturn$model <- object$model;
     ourReturn$other <- object$other;
     ourReturn$responseName <- formula(object)[[2]];
@@ -1325,6 +1516,11 @@ print.summary.clm <- function(x, ...){
     cat(x$model, "estimated via clm()\n");
     cat(paste0("Response variable: ", paste0(x$responseName,collapse="")));
     cat(paste0("\nLoss function used in estimation: ",x$loss));
+    if(!is.null(x$distribution) && x$distribution=="dcgnorm"){
+        cat(paste0("\nDistribution: complex generalised normal, shape=",
+                   round(x$other$shape,digits),
+                   ifelse(isTRUE(x$other$shapeEstimated), " (estimated)", " (provided)")));
+    }
 
     cat("\nCoefficients:\n");
     stars <- setNames(vector("character",length(x$significance)),
@@ -1407,7 +1603,8 @@ predict.clm <- function(object, newdata=NULL, interval=c("none", "confidence", "
 
         # Split the parameters into normal and polynomial (for ARI)
         if(arOrderUsed || maOrderUsed){
-            parameters <- parameters[1:nParametersExo];
+            # seq_len() rather than 1:n, which would select the first element when n=0
+            parameters <- parameters[seq_len(nParametersExo)];
         }
         parametersNames <- names(parameters);
 
@@ -1501,9 +1698,12 @@ predict.clm <- function(object, newdata=NULL, interval=c("none", "confidence", "
             matrixOfxreg <- matrixOfxreg[,parametersNames,drop=FALSE];
         }
         else{
-            matrixOfxreg <- matrix(1, h, 1);
             if(interceptIsNeeded){
+                matrixOfxreg <- matrix(1, h, 1);
                 colnames(matrixOfxreg) <- "(Intercept)";
+            }
+            else{
+                matrixOfxreg <- matrix(0, h, 0);
             }
         }
     }

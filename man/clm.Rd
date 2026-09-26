@@ -8,8 +8,9 @@
 \title{Complex Linear Model}
 \usage{
 clm(formula, data, subset, na.action, loss = c("likelihood", "OLS", "CLS",
-  "MSE", "MAE", "HAM"), orders = c(0, 0, 0), scaling = c("normalisation",
-  "standardisation", "max", "none"), parameters = NULL, fast = FALSE, ...)
+  "MSE", "MAE", "HAM"), distribution = c("dcnorm", "dcgnorm"),
+  orders = c(0, 0, 0), scaling = c("normalisation", "standardisation",
+  "max", "none"), parameters = NULL, fast = FALSE, ...)
 
 \method{sigma}{clm}(object, type = NULL, ...)
 
@@ -54,6 +55,17 @@ example:
 \code{lossFunction <- function(actual, fitted, B, xreg) return(mean(abs(actual-fitted)))}
 \code{loss=lossFunction}}
 
+\item{distribution}{the distribution used in the likelihood, when \code{loss="likelihood"}:
+\itemize{
+\item \code{"dcnorm"} - complex normal distribution (see \link[complex]{dcnorm});
+\item \code{"dcgnorm"} - complex generalised normal distribution
+(see \link[complex]{dcgnorm}). Its shape parameter is estimated, unless it is provided via
+\code{shape} in the ellipsis. The scale and the pseudo-scale are not estimated by the optimiser:
+the circularity coefficient (pseudo-scale divided by scale) is taken from the moments of
+the residuals and the scale is the maximum likelihood estimate given that coefficient. This is
+exact maximum likelihood only for \code{shape=1}, and an approximation otherwise.
+}}
+
 \item{orders}{vector of orders of complex ARIMA(p,d,q).}
 
 \item{scaling}{NOT YET IMPLEMENTED!!! Defines what type of scaling to do for the variables.
@@ -64,9 +76,45 @@ is estimated.}
 
 \item{fast}{if \code{TRUE}, then the function won't check whether
 the data has variability and whether the regressors are correlated. Might
-cause trouble, especially in cases of multicollinearity.}
+cause trouble, especially in cases of multicollinearity. In case of cARIMA without explanatory
+variables (the intercept is allowed), \code{fast=TRUE} also makes the function use the
+Hannan-Rissanen estimates (Hannan & Rissanen, 1982) of the AR and MA parameters as the starting
+values of the optimiser (and, for \code{distribution="dcgnorm"}, the shape that maximises the
+likelihood of their residuals), instead of the default ones.}
 
-\item{...}{Other parameters passed to internal functions.}
+\item{...}{additional parameters to pass to distribution functions. This
+includes:
+\itemize{
+\item \code{FI=TRUE} will make the function also produce Fisher Information
+matrix, which then can be used to calculated variances of smoothing parameters
+and initial states of the model. This is used in the \link[stats]{vcov} method;
+\item \code{shape} - the value of the shape parameter of \code{distribution="dcgnorm"}. If
+provided, the shape is not estimated;
+}
+
+You can also pass parameters to the optimiser:
+\enumerate{
+\item \code{B} - the vector of starting values of parameters for the optimiser,
+should correspond to the explanatory variables. If formula for scale was provided,
+the parameters for that part should follow the parameters for location;
+for \code{distribution="dcgnorm"} with the estimated shape, the starting value of the shape
+can be added as the last element of \code{B};
+\item \code{algorithm} - the algorithm to use in optimisation
+(\code{"NLOPT_LN_SBPLX"} by default);
+\item \code{maxeval} - maximum number of evaluations to carry out. Default is 40 per
+estimated parameter. In case of LASSO / RIDGE the default is 80 per estimated parameter;
+\item \code{maxtime} - stop, when the optimisation time (in seconds) exceeds this;
+\item \code{xtol_rel} - the precision of the optimiser (the default is 1E-6);
+\item \code{xtol_abs} - the absolute precision of the optimiser (the default is 1E-8);
+\item \code{ftol_rel} - the stopping criterion in case of the relative change in the loss
+function (the default is 1E-4);
+\item \code{ftol_abs} - the stopping criterion in case of the absolute change in the loss
+function (the default is 0 - not used);
+\item \code{print_level} - the level of output for the optimiser (0 by default).
+If equal to 41, then the detailed results of the optimisation are returned.
+}
+You can read more about these parameters by running the function
+\link[nloptr]{nloptr.print.options}.}
 
 \item{object}{Object of class "clm" estimated via \code{clm()} function.}
 

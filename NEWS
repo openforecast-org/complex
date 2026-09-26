@@ -1,3 +1,28 @@
+complex v1.0.3 (Release data: 2026-09-25)
+==============
+
+Changes:
+* carima() - pure complex ARIMA (no regressors), a wrapper of clm() with an interface similar to smooth::msarima(): orders as c(p,d,q) or list(ar,i,ma), constant (FALSE by default, TRUE or a value), arma (fixed parameters), model (reuse of an estimated model), h, holdout (with accuracy), silent. Non-seasonal only. forecast() method for carima.
+* auto.carima() - automatic selection of the orders of complex ARIMA. Following auto.ssarima(), AR and MA orders are selected for each order of differencing via an IC-driven neighbourhood search (Hyndman & Khandakar, 2008), and the constant is tested at the end for the best model of each d. search="full" fits all the combinations. The information criteria are calculated on the common sample without the first ar+i+ma observations, so that models with different d are comparable. Each model is estimated from the default starting values and from the closest estimated model.
+* auto.carima() starts every model from the Hannan-Rissanen estimates (via clm(fast=TRUE)) and from the closest estimated model. On wind data this reached a better optimum for the selected model (AICc lower by 6.8) with fewer fits. auto.carima(fast=TRUE) screens all the models via Hannan-Rissanen and estimates via the likelihood only the best one for each d, constant and MA order, before the neighbourhood search. It is about three times faster, but approximate.
+* clm() now penalises non-stationary AR and non-invertible MA parameters in the loss (all roots of the complex AR/MA polynomials should lie outside the unit circle); the loss becomes 1E+100 divided by the smallest modulus of the roots.
+* clm(fast=TRUE) for pure cARIMA (no explanatory variables, the intercept is allowed) now starts the optimiser from the Hannan-Rissanen estimates of AR and MA parameters (and, for dcgnorm, from the shape maximising the likelihood of their residuals). On wind data this reached much higher likelihoods than the default starting values (e.g. 489.8 vs 412.2 for cARIMA(1,1,2)).
+* dcgnorm() and rcgnorm() - density and random generation for the complex generalised normal distribution (complex generalised Gaussian), with scale, pseudo-scale and shape.
+* clm() has a new argument distribution. distribution="dcgnorm" uses the complex generalised normal likelihood, with the shape estimated (or provided via shape=..., with the starting value as the last element of B). The scale and the pseudo-scale are concentrated out: the circularity coefficient comes from the moments of the residuals and the scale is the ML estimate given it (approximate ML when shape is not 1). Standard errors are for the parameters given the shape.
+* AIC() and BIC() of clm() now count all real parameters of the model (both parts of the complex variable), as done in multivariate models. nparam() and the degrees of freedom are still per series. Before, the penalty was half of what it should be. Information criteria values change, and so can the orders selected by them.
+* AICc() and BICc() methods for clm() use the multivariate small-sample correction (Bedrick & Tsai, 1994) with two series, as in the legion package. The correction assumes unrestricted multivariate regression, so it is approximate for complex models.
+* Added tests (testthat).
+
+Bugfixes:
+* clm() without intercept (e.g. y~-1) and with MA terms flipped the sign of the MA parameters (the likelihood was correct, the reported parameters and forecasts were not).
+* predict.clm() for cARIMA without intercept used the first parameter as an intercept (1:0 indexing).
+* clm() without intercept and with AR terms failed in the check of variability of differenced data.
+* clm() with d=0, no intercept and no AR (e.g. cARIMA(0,0,q) with y~-1) selected the first column for the starting values (1:0 indexing) and failed.
+* clm() with loss="CLS" and MA terms failed with an unclear error from the optimiser. It now stops with an explanation (the CLS loss is complex-valued and cannot be minimised numerically).
+* clm() with nothing to estimate (e.g. cARIMA(0,1,0) without intercept) failed in the optimiser.
+* The documentation of the ellipsis in clm() was hidden by the one of sigma.clm().
+
+
 complex v1.0.2 (Release data: 2026-02-03)
 ==============
 
