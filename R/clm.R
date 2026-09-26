@@ -879,9 +879,9 @@ clm <- function(formula, data, subset, na.action,
         if(loss=="CLS"){
             # If this is d=0 model
             if(iOrder==0){
-                B <- as.vector(invert(t(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*%
-                                          matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*%
-                                   t(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*% y);
+                B <- as.vector(invert(t(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*%
+                                          matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*%
+                                   t(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*% y);
             }
             else{
                 matrixXregForDiffs <- iModelDesign();
@@ -903,9 +903,9 @@ clm <- function(formula, data, subset, na.action,
         else if(loss=="OLS"){
             # If this is d=0 model
             if(iOrder==0){
-                B <- as.vector(invert(t(Conj(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE])) %*%
-                                          matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*%
-                                   t(Conj(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE])) %*% y);
+                B <- as.vector(invert(t(Conj(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE])) %*%
+                                          matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*%
+                                   t(Conj(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE])) %*% y);
             }
             else{
                 matrixXregForDiffs <- iModelDesign();
@@ -932,9 +932,9 @@ clm <- function(formula, data, subset, na.action,
             if(is.null(B)){
                 # If this is d=0 model
                 if(iOrder==0){
-                    B <- as.vector(invert(t(Conj(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE])) %*%
-                                              matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE]) %*%
-                                       t(Conj(matrixXreg[,1:(nVariablesExo+arOrder), drop=FALSE])) %*% y);
+                    B <- as.vector(invert(t(Conj(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE])) %*%
+                                              matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE]) %*%
+                                       t(Conj(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE])) %*% y);
                 }
                 else{
                     matrixXregForDiffs <- iModelDesign();

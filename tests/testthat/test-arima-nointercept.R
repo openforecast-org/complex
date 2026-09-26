@@ -44,3 +44,13 @@ test_that("cARIMA(0,1,0) without intercept has nothing to estimate and forecasts
         expect_equal(as.vector(predict(model, newdata=matrix(NA, 3, 1))$mean), rep(y[obs], 3))
     }
 })
+
+test_that("cARIMA(0,0,q) without intercept can be estimated", {
+    set.seed(4)
+    e <- rcnorm(500, 0, sigma2=1, varsigma2=0.3)
+    y <- e + c(0, (0.5-0.2i)*e[-500])
+    for(loss in c("likelihood", "OLS", "CLS")){
+        model <- suppressWarnings(clm(y~-1, data.frame(y=y), orders=c(0,0,1), loss=loss))
+        expect_equal(unname(coef(model)), 0.5-0.2i, tolerance=0.1)
+    }
+})
