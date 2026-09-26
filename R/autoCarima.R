@@ -16,6 +16,17 @@
 #' option for the constant and the neighbourhood search continues from it. The best of all the
 #' estimated models is returned.
 #' }
+#' With \code{fast=TRUE}, all cARIMA(p,d,q) with and without constant are first estimated via
+#' the Hannan-Rissanen method (Hannan & Rissanen, 1982): the differences are regressed on their
+#' lags and on the lags of the errors approximated by a long AR, via complex least squares. Their
+#' information criteria are approximate. Then the best of them for each \eqn{d}, constant and
+#' MA order is estimated via the likelihood, and the neighbourhood search continues from the best
+#' of these models (with its \eqn{d} and constant). With heavy tails, the least squares used in the
+#' screening is not efficient and tends to underrate the models with MA terms, which is why the best
+#' model for each MA order is estimated. This is still an approximation: on wind data with heavy
+#' tails, \code{fast=TRUE} selected a model with an information criterion worse by 16 than
+#' the one found with \code{fast=FALSE}, while being about three times faster.
+#'
 #' With \code{search="full"}, all combinations of p, d, q and the constant are fitted
 #' (except for cARIMA(p,0,q) without constant when \code{constant=NULL}).
 #'
@@ -26,9 +37,9 @@
 #' maximum orders. The log-likelihood on that sample is calculated at the estimated parameters,
 #' with the scale re-estimated.
 #'
-#' Every model is estimated from the default starting values and from the parameters of the
-#' closest model already estimated (with zeros for the new parameters), and the one with the
-#' higher likelihood is kept.
+#' Every model is estimated from the Hannan-Rissanen estimates of its parameters (see
+#' \code{fast} in \link[complex]{clm}) and from the parameters of the closest model already
+#' estimated (with zeros for the new parameters), and the one with the higher likelihood is kept.
 #'
 #' @template author
 #' @template keywords
@@ -44,6 +55,8 @@
 #' @param h the forecast horizon.
 #' @param holdout if \code{TRUE}, the last \code{h} observations are held out.
 #' @param silent if \code{FALSE}, the progress is printed and the final model is plotted.
+#' @param fast if \code{TRUE}, the models are screened via the Hannan-Rissanen method before the
+#' search (see details). Ignored with \code{search="full"}.
 #' @param ... other parameters passed to \link[complex]{carima} and \link[complex]{clm}.
 #'
 #' @return The selected model of the class \code{carima} (see \link[complex]{carima}), with
@@ -52,10 +65,14 @@
 #' \item \code{ICs} - data frame with the orders, the constant and the information criterion
 #' (on the common sample) of all the models estimated in the process,
 #' \item \code{ic} - the information criterion used,
-#' \item \code{icObsDropped} - the number of first observations dropped for the criteria.
+#' \item \code{icObsDropped} - the number of first observations dropped for the criteria,
+#' \item \code{ICsScreening} - with \code{fast=TRUE}, the approximate criteria of all the models
+#' estimated via Hannan-Rissanen.
 #' }
 #'
 #' @references \itemize{
+#' \item Hannan, E. J., Rissanen, J. (1982). Recursive estimation of mixed autoregressive-moving
+#' average order. Biometrika, 69(1), 81-94.
 #' \item Svetunkov, I., Boylan, J. E. (2019). State-space ARIMA for supply-chain forecasting.
 #' International Journal of Production Research, 58(3), 818-827.
 #' \item Hyndman, R. J., Khandakar, Y. (2008). Automatic time series forecasting: the forecast
@@ -78,7 +95,7 @@
 auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
                         ic=c("AICc","AIC","BIC","BICc"), search=c("stepwise","full"),
                         distribution=c("dcnorm","dcgnorm"),
-                        h=0, holdout=FALSE, silent=TRUE, ...){
+                        h=0, holdout=FALSE, silent=TRUE, fast=FALSE, ...){
     cl <- match.call();
     ic <- match.arg(ic);
     search <- match.arg(search);
@@ -86,6 +103,10 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
     ellipsis <- list(...);
     # The starting values are set by the function
     ellipsis$B <- NULL;
+    if(fast && search=="full"){
+        warning("fast=TRUE is only used with search=\"stepwise\". Ignoring it.", call.=FALSE);
+        fast <- FALSE;
+    }
 
     orders <- carimaOrders(orders);
     arMax <- orders$ar;
@@ -153,10 +174,12 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
         if(!is.null(estimated[[key]])){
             return(estimated[[key]]);
         }
+        # Without B, clm(fast=TRUE) starts from the Hannan-Rissanen estimates
         fit <- function(B=NULL){
             carimaArgs <- c(list(y=y, orders=c(p, d, q), constant=constant,
                                  loss="likelihood", distribution=distribution),
-                            if(!is.null(B)) list(B=B), ellipsis);
+                            if(!is.null(B)) list(B=B) else list(fast=TRUE),
+                            ellipsis);
             tryCatch(do.call(carima, carimaArgs), error=function(e) NULL);
         }
         fits <- c(list(fit()),
@@ -180,7 +203,128 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
 
     constantOptions <- if(is.null(constant)) c(FALSE, TRUE) else constant;
 
-    if(search=="full"){
+    #### Screening via Hannan-Rissanen (fast=TRUE) ####
+    # For each d and constant, all cARIMA(p,d,q) are estimated via Hannan-Rissanen (complex least
+    # squares on the differences, with the errors approximated by a long AR). Their information
+    # criteria (from the residuals of the recursion, on the common sample) are approximate.
+    obsInSample <- length(y);
+    # Information criterion from the residuals (aligned with y) on the common sample, and the
+    # shape of dcgnorm that maximises the likelihood of these residuals
+    screenIC <- function(errors, nComplex){
+        errors <- errors[(obsDropped+1):obsInSample];
+        obsTrimmed <- length(errors);
+        shapeEstimated <- distribution=="dcgnorm";
+        shapeValue <- NULL;
+        if(shapeEstimated){
+            shapeFit <- optimize(function(logShape) cgnormConcentrated(errors, exp(logShape))$logLik,
+                                 c(log(0.05), log(20)), maximum=TRUE);
+            llikelihood <- shapeFit$objective;
+            shapeValue <- exp(shapeFit$maximum);
+            nParam <- nComplex + 3/2 + 1/2;
+        }
+        else{
+            errorsMatrix <- complex2vec(errors);
+            llikelihood <- -obsTrimmed*(log(2*pi) + 1 +
+                                            0.5*log(det(t(errorsMatrix) %*% errorsMatrix / obsTrimmed)));
+            nParam <- nComplex + 3/2;
+        }
+        return(list(IC=clmIC(llikelihood, nParam, obsTrimmed, shapeEstimated, ic), shape=shapeValue));
+    }
+    hrScreen <- function(){
+        screenRows <- list();
+        for(d in 0:iMax){
+            for(constantValue in constantOptions){
+                if(d==0 && !constantValue && is.null(constant)){
+                    next;
+                }
+                u <- as.vector(if(d>0) diff(y, differences=d) else y);
+                errors <- if(maMax>0) tryCatch(hrErrors(u, constantValue), error=function(e) NULL) else NULL;
+                for(p in 0:arMax){
+                    for(q in 0:maMax){
+                        key <- modelKey(p, d, q, constantValue);
+                        ICValue <- Inf;
+                        estimates <- NULL;
+                        if(q==0 || !is.null(errors)){
+                            estimates <- tryCatch(hannanRissanen(u, p, q, constantValue, errors),
+                                                  error=function(e) NULL);
+                        }
+                        if(!is.null(estimates) &&
+                           (length(estimates$ar)==0 || all(Mod(polyroot(c(1, -estimates$ar)))>1)) &&
+                           (length(estimates$ma)==0 || all(Mod(polyroot(c(1, estimates$ma)))>1))){
+                            residualsHR <- c(rep(NA_complex_, d),
+                                             armaResiduals(u, estimates$constant, estimates$ar, estimates$ma));
+                            screenValues <- screenIC(residualsHR, as.integer(constantValue) + p + q);
+                            ICValue <- screenValues$IC;
+                        }
+                        screenRows[[key]] <- data.frame(p=p, d=d, q=q, constant=constantValue,
+                                                        IC=ICValue, key=key);
+                        if(!silent){
+                            cat("Hannan-Rissanen cARIMA(", p, ",", d, ",", q, ")",
+                                ifelse(constantValue, " with constant", ""), ": ", round(ICValue, 3),
+                                "\n", sep="");
+                        }
+                    }
+                }
+            }
+        }
+        screenTable <- do.call(rbind, screenRows);
+        rownames(screenTable) <- NULL;
+        return(screenTable);
+    }
+
+    # Neighbourhood search: from the given model, move to the best of the models with p and q
+    # different by at most one, as long as the information criterion improves
+    neighbourhoodSearch <- function(best, d, constantValue){
+        pBest <- best$model$orders$ar;
+        qBest <- best$model$orders$ma;
+        repeat{
+            neighbours <- expand.grid(p=pBest+(-1:1), q=qBest+(-1:1));
+            neighbours <- neighbours[neighbours$p>=0 & neighbours$p<=arMax &
+                                         neighbours$q>=0 & neighbours$q<=maMax &
+                                         !(neighbours$p==pBest & neighbours$q==qBest),,drop=FALSE];
+            if(nrow(neighbours)==0){
+                break;
+            }
+            results <- lapply(seq_len(nrow(neighbours)), function(i){
+                fitCandidate(neighbours$p[i], d, neighbours$q[i], constantValue,
+                             if(!is.null(best$model)) list(best$model) else list());
+            });
+            neighbourICs <- sapply(results, `[[`, "IC");
+            if(min(neighbourICs) < best$IC){
+                best <- results[[which.min(neighbourICs)]];
+                pBest <- neighbours$p[which.min(neighbourICs)];
+                qBest <- neighbours$q[which.min(neighbourICs)];
+            }
+            else{
+                break;
+            }
+        }
+        return(best);
+    }
+
+    if(fast){
+        screenTable <- hrScreen();
+        # The best screened model for each d, constant and q is estimated via the likelihood.
+        # Taking the best for each q protects the models with MA terms, which the screening can
+        # underrate (e.g. with heavy tails, where least squares is not efficient)
+        screenTable <- screenTable[order(screenTable$IC),,drop=FALSE];
+        bestScreened <- screenTable[is.finite(screenTable$IC) &
+                                        !duplicated(screenTable[,c("d","constant","q")]),,drop=FALSE];
+        if(!silent){
+            cat("Estimating", nrow(bestScreened), "models via the likelihood...\n");
+        }
+        for(i in seq_len(nrow(bestScreened))){
+            fitCandidate(bestScreened$p[i], bestScreened$d[i], bestScreened$q[i], bestScreened$constant[i]);
+        }
+        # The neighbourhood search with the likelihood continues from the best of them
+        ICs <- sapply(estimated, `[[`, "IC");
+        best <- estimated[[which.min(ICs)]];
+        if(!silent){
+            cat("Neighbourhood search from the best model...\n");
+        }
+        neighbourhoodSearch(best, best$model$orders$i, best$model$constant);
+    }
+    else if(search=="full"){
         for(d in 0:iMax){
             for(constantValue in constantOptions){
                 if(d==0 && !constantValue && is.null(constant)){
@@ -207,36 +351,6 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
         }
     }
     else{
-        # Neighbourhood search: from the given model, move to the best of the models with p and q
-        # different by at most one, as long as the information criterion improves
-        neighbourhoodSearch <- function(best, d, constantValue){
-            pBest <- best$model$orders$ar;
-            qBest <- best$model$orders$ma;
-            repeat{
-                neighbours <- expand.grid(p=pBest+(-1:1), q=qBest+(-1:1));
-                neighbours <- neighbours[neighbours$p>=0 & neighbours$p<=arMax &
-                                             neighbours$q>=0 & neighbours$q<=maMax &
-                                             !(neighbours$p==pBest & neighbours$q==qBest),,drop=FALSE];
-                if(nrow(neighbours)==0){
-                    break;
-                }
-                results <- lapply(seq_len(nrow(neighbours)), function(i){
-                    fitCandidate(neighbours$p[i], d, neighbours$q[i], constantValue,
-                                 if(!is.null(best$model)) list(best$model) else list());
-                });
-                neighbourICs <- sapply(results, `[[`, "IC");
-                if(min(neighbourICs) < best$IC){
-                    best <- results[[which.min(neighbourICs)]];
-                    pBest <- neighbours$p[which.min(neighbourICs)];
-                    qBest <- neighbours$q[which.min(neighbourICs)];
-                }
-                else{
-                    break;
-                }
-            }
-            return(best);
-        }
-
         # Search for p and q within each d, starting from cARIMA(0,d,0). The constant is included
         # for d=0 and excluded for d>0 (unless it is provided), and is tested at the end.
         bestPerDiff <- vector("list", iMax+1);
@@ -289,6 +403,11 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
     rownames(ICsTable) <- NULL;
 
     bestModel$ICs <- ICsTable;
+    if(fast){
+        screenTable <- screenTable[, c("p","d","q","constant","IC")];
+        names(screenTable)[5] <- ic;
+        bestModel$ICsScreening <- screenTable;
+    }
     bestModel$ic <- ic;
     bestModel$icObsDropped <- obsDropped;
     bestModel$autoCall <- cl;

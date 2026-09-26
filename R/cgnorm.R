@@ -73,7 +73,7 @@ dcgnorm <- function(q, mu=0, scale=1, pseudoscale=0, shape=1, log=FALSE){
 #' @rdname cgnormal
 #' @export rcgnorm
 #' @aliases rcgnorm
-#' @importFrom stats rgamma runif
+#' @importFrom stats rgamma runif optimize
 rcgnorm <- function(n=1, mu=0, scale=1, pseudoscale=0, shape=1){
     cgnormCheck(scale, pseudoscale, shape);
     # Covariance-type matrix of the real and imaginary parts (as in dcnorm)

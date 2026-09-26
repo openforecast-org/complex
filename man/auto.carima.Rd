@@ -7,7 +7,7 @@
 auto.carima(y, orders = list(ar = 3, i = 2, ma = 3), constant = NULL,
   ic = c("AICc", "AIC", "BIC", "BICc"), search = c("stepwise", "full"),
   distribution = c("dcnorm", "dcgnorm"), h = 0, holdout = FALSE,
-  silent = TRUE, ...)
+  silent = TRUE, fast = FALSE, ...)
 }
 \arguments{
 \item{y}{vector or ts object with the complex-valued time series.}
@@ -30,6 +30,9 @@ combinations of orders.}
 
 \item{silent}{if \code{FALSE}, the progress is printed and the final model is plotted.}
 
+\item{fast}{if \code{TRUE}, the models are screened via the Hannan-Rissanen method before the
+search (see details). Ignored with \code{search="full"}.}
+
 \item{...}{other parameters passed to \link[complex]{carima} and \link[complex]{clm}.}
 }
 \value{
@@ -39,7 +42,9 @@ additional elements:
 \item \code{ICs} - data frame with the orders, the constant and the information criterion
 (on the common sample) of all the models estimated in the process,
 \item \code{ic} - the information criterion used,
-\item \code{icObsDropped} - the number of first observations dropped for the criteria.
+\item \code{icObsDropped} - the number of first observations dropped for the criteria,
+\item \code{ICsScreening} - with \code{fast=TRUE}, the approximate criteria of all the models
+estimated via Hannan-Rissanen.
 }
 }
 \description{
@@ -60,6 +65,17 @@ is included for \eqn{d=0} and excluded otherwise;
 option for the constant and the neighbourhood search continues from it. The best of all the
 estimated models is returned.
 }
+With \code{fast=TRUE}, all cARIMA(p,d,q) with and without constant are first estimated via
+the Hannan-Rissanen method (Hannan & Rissanen, 1982): the differences are regressed on their
+lags and on the lags of the errors approximated by a long AR, via complex least squares. Their
+information criteria are approximate. Then the best of them for each \eqn{d}, constant and
+MA order is estimated via the likelihood, and the neighbourhood search continues from the best
+of these models (with its \eqn{d} and constant). With heavy tails, the least squares used in the
+screening is not efficient and tends to underrate the models with MA terms, which is why the best
+model for each MA order is estimated. This is still an approximation: on wind data with heavy
+tails, \code{fast=TRUE} selected a model with an information criterion worse by 16 than
+the one found with \code{fast=FALSE}, while being about three times faster.
+
 With \code{search="full"}, all combinations of p, d, q and the constant are fitted
 (except for cARIMA(p,0,q) without constant when \code{constant=NULL}).
 
@@ -70,9 +86,9 @@ the common sample without the first \eqn{k} observations, where \eqn{k} is the s
 maximum orders. The log-likelihood on that sample is calculated at the estimated parameters,
 with the scale re-estimated.
 
-Every model is estimated from the default starting values and from the parameters of the
-closest model already estimated (with zeros for the new parameters), and the one with the
-higher likelihood is kept.
+Every model is estimated from the Hannan-Rissanen estimates of its parameters (see
+\code{fast} in \link[complex]{clm}) and from the parameters of the closest model already
+estimated (with zeros for the new parameters), and the one with the higher likelihood is kept.
 }
 \examples{
 set.seed(41)
@@ -85,6 +101,8 @@ model$ICs
 }
 \references{
 \itemize{
+\item Hannan, E. J., Rissanen, J. (1982). Recursive estimation of mixed autoregressive-moving
+average order. Biometrika, 69(1), 81-94.
 \item Svetunkov, I., Boylan, J. E. (2019). State-space ARIMA for supply-chain forecasting.
 International Journal of Production Research, 58(3), 818-827.
 \item Hyndman, R. J., Khandakar, Y. (2008). Automatic time series forecasting: the forecast

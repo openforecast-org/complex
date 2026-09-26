@@ -55,3 +55,25 @@ test_that("clm() penalises non-stationary and non-invertible parameters", {
     expect_true(all(Mod(polyroot(c(1, -coef(model)[1])))>1))
     expect_true(all(Mod(polyroot(c(1, coef(model)[2])))>1))
 })
+
+test_that("auto.carima(fast=TRUE) finds the same models via Hannan-Rissanen screening", {
+    set.seed(41)
+    obs <- 400
+    e <- rcnorm(obs, 0, sigma2=1, varsigma2=0.3+0.2i)
+    dy <- e
+    for(t in 2:obs){
+        dy[t] <- (0.5+0.2i)*dy[t-1] + e[t] + (0.3-0.1i)*e[t-1]
+    }
+    y <- cumsum(dy)
+    model <- auto.carima(y, orders=list(ar=2, i=1, ma=2), fast=TRUE)
+    expect_equal(model$orders, list(ar=1, i=1, ma=1))
+    expect_false(model$constant)
+    expect_true(!is.null(model$ICsScreening))
+    expect_equal(nrow(model$ICsScreening), 3*3*3)
+    set.seed(7)
+    y <- cumsum(rcnorm(400, 0.3+0.1i, sigma2=1, varsigma2=0.2))
+    model <- auto.carima(y, orders=list(ar=2, i=1, ma=2), fast=TRUE)
+    expect_equal(model$orders, list(ar=0, i=1, ma=0))
+    expect_true(model$constant)
+    expect_warning(auto.carima(y, orders=list(ar=1, i=1, ma=1), search="full", fast=TRUE), "fast")
+})
