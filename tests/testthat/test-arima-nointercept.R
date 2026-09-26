@@ -56,3 +56,21 @@ test_that("cARIMA(0,0,q) without intercept can be estimated", {
     # CLS is complex-valued and cannot be used in the numeric optimisation needed for MA
     expect_error(clm(y~-1, data.frame(y=y), orders=c(0,0,1), loss="CLS"), "cannot be used with MA")
 })
+
+test_that("Hannan-Rissanen estimates and clm(fast=TRUE)", {
+    set.seed(41)
+    obs <- 4000
+    e <- rcnorm(obs, 0, sigma2=1, varsigma2=0.3+0.2i)
+    u <- e
+    for(t in 2:obs){
+        u[t] <- 1+0.5i + (0.5+0.2i)*u[t-1] + e[t] + (0.3-0.1i)*e[t-1]
+    }
+    estimates <- complex:::hannanRissanen(u, 1, 1, constant=TRUE)
+    expect_equal(c(estimates$constant, estimates$ar, estimates$ma), c(1+0.5i, 0.5+0.2i, 0.3-0.1i),
+                 tolerance=0.1)
+    y <- cumsum(u)
+    model <- clm(y~1, data.frame(y=y), orders=c(1,1,1), fast=TRUE)
+    modelDefault <- clm(y~1, data.frame(y=y), orders=c(1,1,1))
+    expect_gte(as.numeric(logLik(model)), as.numeric(logLik(modelDefault)) - 1e-3)
+    expect_equal(unname(coef(model)), c(1+0.5i, 0.5+0.2i, 0.3-0.1i), tolerance=0.1)
+})

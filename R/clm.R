@@ -58,7 +58,11 @@
 #' is estimated.
 #' @param fast if \code{TRUE}, then the function won't check whether
 #' the data has variability and whether the regressors are correlated. Might
-#' cause trouble, especially in cases of multicollinearity.
+#' cause trouble, especially in cases of multicollinearity. In case of cARIMA without explanatory
+#' variables (the intercept is allowed), \code{fast=TRUE} also makes the function use the
+#' Hannan-Rissanen estimates (Hannan & Rissanen, 1982) of the AR and MA parameters as the starting
+#' values of the optimiser (and, for \code{distribution="dcgnorm"}, the shape that maximises the
+#' likelihood of their residuals), instead of the default ones.
 #' @param ... additional parameters to pass to distribution functions. This
 #' includes:
 #' \itemize{
@@ -879,6 +883,23 @@ clm <- function(formula, data, subset, na.action,
     # if(scaling!="none"){
     # }
 
+    # Hannan-Rissanen starting values for pure cARIMA with fast=TRUE (NULL if not applicable or failed)
+    hrStart <- function(){
+        if(!(fast && arimaModel && (arOrder>0 || maOrder>0) && (nVariablesExo-interceptIsNeeded)==0)){
+            return(NULL);
+        }
+        u <- as.vector(if(iOrder>0) diff(y, differences=iOrder) else y);
+        estimates <- tryCatch(hannanRissanen(u, arOrder, maOrder, interceptIsNeeded),
+                              error=function(e) NULL);
+        if(is.null(estimates)){
+            return(NULL);
+        }
+        arValues <- hrAdmissible(estimates$ar, -1);
+        maValues <- hrAdmissible(estimates$ma, 1);
+        return(list(B=c(estimates$constant, arValues, maValues),
+                    residuals=armaResiduals(u, estimates$constant, arValues, maValues)));
+    }
+
     #### Estimate parameters of the model ####
     if(is.null(parameters)){
         if(loss=="CLS"){
@@ -920,6 +941,10 @@ clm <- function(formula, data, subset, na.action,
             if(maOrderUsed){
                 # Add initial values for the maOrder
                 B <- c(B, rep(0.1*(1+1i),maOrder));
+                hrValues <- hrStart();
+                if(!is.null(hrValues)){
+                    B <- hrValues$B;
+                }
                 # Estimate the model
                 res <- estimator(B, print_level);
                 B <- res$B;
@@ -934,7 +959,17 @@ clm <- function(formula, data, subset, na.action,
             # 1. paramExo,
             # 2. paramAR,
             # 3. paramMA.
-            if(is.null(B)){
+            hrValues <- if(is.null(B)) hrStart() else NULL;
+            if(!is.null(hrValues)){
+                B <- hrValues$B;
+                # The shape that maximises the likelihood of the Hannan-Rissanen residuals
+                if(shapeEstimate){
+                    hrResiduals <- hrValues$residuals[!is.na(hrValues$residuals)];
+                    shape <- exp(optimize(function(logShape) cgnormConcentrated(hrResiduals, exp(logShape))$logLik,
+                                          c(log(0.05), log(20)), maximum=TRUE)$maximum);
+                }
+            }
+            else if(is.null(B)){
                 # If this is d=0 model
                 if(iOrder==0){
                     B <- as.vector(invert(t(Conj(matrixXreg[,seq_len(nVariablesExo+arOrder), drop=FALSE])) %*%

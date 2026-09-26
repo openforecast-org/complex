@@ -76,7 +76,11 @@ is estimated.}
 
 \item{fast}{if \code{TRUE}, then the function won't check whether
 the data has variability and whether the regressors are correlated. Might
-cause trouble, especially in cases of multicollinearity.}
+cause trouble, especially in cases of multicollinearity. In case of cARIMA without explanatory
+variables (the intercept is allowed), \code{fast=TRUE} also makes the function use the
+Hannan-Rissanen estimates (Hannan & Rissanen, 1982) of the AR and MA parameters as the starting
+values of the optimiser (and, for \code{distribution="dcgnorm"}, the shape that maximises the
+likelihood of their residuals), instead of the default ones.}
 
 \item{...}{additional parameters to pass to distribution functions. This
 includes:
