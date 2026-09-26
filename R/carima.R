@@ -154,6 +154,15 @@ carima <- function(y, orders=list(ar=0, i=0, ma=0), constant=FALSE, arma=NULL, m
                              ifelse(constant, " with constant", ""));
     class(ourModel) <- c("carima", class(ourModel));
 
+    ourModel <- carimaFinalise(ourModel, h, holdout, if(holdout) holdoutData else NULL, silent);
+
+    return(ourModel);
+}
+
+# Forecasts, holdout accuracy and the plot for an estimated carima model
+carimaFinalise <- function(ourModel, h, holdout, holdoutData, silent){
+    ourModel$h <- h;
+    ourModel$holdout <- holdout;
     if(h>0){
         ourModel$forecast <- as.vector(predict(ourModel, newdata=matrix(NA, h, 1))$mean);
         if(holdout){
@@ -163,7 +172,6 @@ carima <- function(y, orders=list(ar=0, i=0, ma=0), constant=FALSE, arma=NULL, m
                                    MAE=mean(Mod(errors)), RMSE=sqrt(mean(Mod(errors)^2)));
         }
     }
-
     if(!silent){
         if(h>0){
             plot(forecast(ourModel, h=h));
@@ -172,7 +180,6 @@ carima <- function(y, orders=list(ar=0, i=0, ma=0), constant=FALSE, arma=NULL, m
             plot(ourModel, 7);
         }
     }
-
     return(ourModel);
 }
 

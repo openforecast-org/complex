@@ -283,6 +283,27 @@ clm <- function(formula, data, subset, na.action,
             shapeValue <- exp(B[length(B)]);
             B <- B[-length(B)];
         }
+
+        # Stationarity (AR) and invertibility (MA) conditions: all roots of the complex polynomials
+        # should lie outside the unit circle. The differencing polynomial is not checked.
+        # The check is skipped if the vector of parameters does not match the orders (this happens
+        # in the re-estimation done by vcov.clm, where the MA columns are passed as regressors)
+        if((arOrder>0 || maOrder>0) &&
+           (ifelse(is.complex(B), length(B), length(B)/2) == nVariablesExo+arOrder+maOrder)){
+            if(is.complex(B)){
+                BComplex <- B;
+            }
+            else{
+                BComplex <- complex(real=B[seq_len(length(B)/2)],
+                                    imaginary=B[length(B)/2+seq_len(length(B)/2)]);
+            }
+            rootsModuli <- c(if(arOrder>0) Mod(polyroot(c(1, -BComplex[nVariablesExo+seq_len(arOrder)]))),
+                             if(maOrder>0) Mod(polyroot(c(1, BComplex[nVariablesExo+arOrder+seq_len(maOrder)]))));
+            if(any(rootsModuli<=1)){
+                return(1/min(rootsModuli)*1E+100);
+            }
+        }
+
         fitterReturn <- fitter(B, y, matrixXreg);
 
         if(loss=="likelihood" && distribution=="dcgnorm"){
@@ -1082,41 +1103,44 @@ logLik.clm <- function(object, ...){
 }
 
 # Multivariate small-sample corrections (Bedrick & Tsai, 1994), as in legion,
-# with two series (real and imaginary parts). nParamPerSeries excludes the share of
-# the covariance matrix (3 real parameters, i.e. 3/2 per series). The correction is
-# derived for unrestricted multivariate regression, so it is approximate for clm.
+# with two series (real and imaginary parts). The correction is derived for unrestricted
+# multivariate regression, so it is approximate for clm.
 #' @export
 AICc.clm <- function(object, ...){
-    llikelihood <- logLik(object);
-    llikelihood <- llikelihood[1:length(llikelihood)];
-    nSeries <- 2;
-    nParamAll <- 2*nparam(object);
-    nParamPerSeries <- nparam(object) - (nSeries+1)/2 - isTRUE(object$other$shapeEstimated)/2;
-    obs <- nobs(object);
-    if(obs - (nParamPerSeries + nSeries + 1) <= 0){
-        IC <- Inf;
-    }
-    else{
-        IC <- -2*llikelihood + 2*(obs*nParamAll/(obs - (nParamPerSeries + nSeries + 1)));
-    }
-    return(IC);
+    return(clmIC(logLik(object), nparam(object), nobs(object),
+                 isTRUE(object$other$shapeEstimated), "AICc"));
 }
 
 #' @export
 BICc.clm <- function(object, ...){
-    llikelihood <- logLik(object);
-    llikelihood <- llikelihood[1:length(llikelihood)];
+    return(clmIC(logLik(object), nparam(object), nobs(object),
+                 isTRUE(object$other$shapeEstimated), "BICc"));
+}
+
+# Information criteria of clm given the log-likelihood, the number of parameters per series
+# (as returned by nparam.clm) and the number of observations.
+# All real parameters (2*nParam) are counted in the penalty. For AICc/BICc, the number of
+# parameters per series excludes the share of the covariance matrix (3/2) and of the shape (1/2).
+clmIC <- function(llikelihood, nParam, obs, shapeEstimated=FALSE, ic=c("AIC","AICc","BIC","BICc")){
+    ic <- match.arg(ic);
+    llikelihood <- as.numeric(llikelihood);
     nSeries <- 2;
-    nParamAll <- 2*nparam(object);
-    nParamPerSeries <- nparam(object) - (nSeries+1)/2 - isTRUE(object$other$shapeEstimated)/2;
-    obs <- nobs(object);
+    nParamAll <- 2*nParam;
+    nParamPerSeries <- nParam - (nSeries+1)/2 - shapeEstimated/2;
+    if(ic=="AIC"){
+        return(-2*llikelihood + 2*nParamAll);
+    }
+    if(ic=="BIC"){
+        return(-2*llikelihood + log(obs)*nParamAll);
+    }
     if(obs - (nParamPerSeries + nSeries + 1) <= 0){
-        IC <- Inf;
+        return(Inf);
     }
-    else{
-        IC <- -2*llikelihood + log(obs)*(obs*nParamAll/(obs - (nParamPerSeries + nSeries + 1)));
+    penalty <- obs*nParamAll/(obs - (nParamPerSeries + nSeries + 1));
+    if(ic=="AICc"){
+        return(-2*llikelihood + 2*penalty);
     }
-    return(IC);
+    return(-2*llikelihood + log(obs)*penalty);
 }
 
 #' @rdname clm
