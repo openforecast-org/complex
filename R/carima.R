@@ -5,8 +5,10 @@
 #'
 #' The model is
 #' \deqn{(1-\phi_1 B-\dots-\phi_p B^p)(1-B)^d y_t = c + (1+\theta_1 B+\dots+\theta_q B^q)\epsilon_t ,}
-#' where all the parameters are complex and \eqn{c} is the constant (included only when
-#' \code{constant} is not \code{FALSE}). With \code{d>0} the constant acts as a drift.
+#' where all the parameters are complex and \eqn{c} is the constant (included unless
+#' \code{constant="none"}). With \code{d>0} the constant acts as a drift. The constant can also
+#' be restricted to its real or imaginary part (e.g. for the logarithm of wind,
+#' \code{constant="real"} gives a drift in the log speed but not in the direction).
 #'
 #' Only the non-seasonal model is supported. Parameters are estimated via \link[complex]{clm},
 #' so its restrictions apply: the first lags are extrapolated and the first MA errors are set to
@@ -19,9 +21,11 @@
 #' @param y vector or ts object with the complex-valued time series.
 #' @param orders orders of the model: either a vector \code{c(p,d,q)} or a list
 #' \code{list(ar=p, i=d, ma=q)} (elements that are not provided are set to zero).
-#' @param constant if \code{TRUE}, the constant term is included in the model and estimated.
-#' Can also be a complex number (the value of the constant), in which case all the other
-#' parameters need to be provided via \code{arma}.
+#' @param constant which constant to include: \code{"none"}, \code{"real"} (the real part only,
+#' the imaginary part is zero), \code{"imaginary"} (the imaginary part only) or \code{"both"}
+#' (a complex constant). In \link[complex]{clm} these correspond to the formulae \code{y~-1},
+#' \code{y~1-Im(1)}, \code{y~1-Re(1)} and \code{y~1}. Can also be a complex number (the value of
+#' the constant), in which case all the other parameters need to be provided via \code{arma}.
 #' @param arma list \code{list(ar=..., ma=...)} or a vector (AR parameters followed by MA ones)
 #' with the fixed complex AR/MA parameters. All of them need to be provided; the model is then
 #' not estimated.
@@ -42,7 +46,8 @@
 #' \link[complex]{clm}, plus
 #' \itemize{
 #' \item \code{orders} - the list of orders,
-#' \item \code{constant} - whether the constant is included,
+#' \item \code{constant} - the type of the constant (\code{"none"}, \code{"real"},
+#' \code{"imaginary"} or \code{"both"}),
 #' \item \code{h}, \code{holdout} - the horizon and the holdout flag,
 #' \item \code{forecast} - the point forecasts (if \code{h>0}),
 #' \item \code{holdoutData} - the held-out values (if \code{holdout=TRUE}),
@@ -58,13 +63,16 @@
 #' e <- rcnorm(200, 0, sigma2=1, varsigma2=0.3+0.2i)
 #' y <- cumsum(e + c(0, 0.5*e[-200]))
 #' model <- carima(y, orders=c(0,1,1), h=10, holdout=TRUE)
+#' # Drift in the real part only
+#' carima(y, orders=c(0,1,1), constant="real")
 #' summary(model)
 #' model$accuracy
 #' forecast(model, h=5)
 #'
 #' @rdname carima
 #' @export
-carima <- function(y, orders=list(ar=0, i=0, ma=0), constant=FALSE, arma=NULL, model=NULL,
+carima <- function(y, orders=list(ar=0, i=0, ma=0), constant=c("none","real","imaginary","both"),
+                   arma=NULL, model=NULL,
                    loss=c("likelihood","OLS","CLS","MSE","MAE","HAM"),
                    distribution=c("dcnorm","dcgnorm"),
                    h=0, holdout=FALSE, silent=TRUE, ...){
@@ -94,13 +102,18 @@ carima <- function(y, orders=list(ar=0, i=0, ma=0), constant=FALSE, arma=NULL, m
     orders <- carimaOrders(orders);
     ordersVector <- c(orders$ar, orders$i, orders$ma);
 
-    # Constant: FALSE, TRUE (estimate) or a value
-    if(is.logical(constant)){
+    # Constant: its type, or a value (a fixed complex constant)
+    if(is.character(constant)){
+        constant <- match.arg(constant, c("none","real","imaginary","both"));
         constantValue <- NULL;
+    }
+    else if(is.logical(constant)){
+        stop("constant should be one of \"none\", \"real\", \"imaginary\", \"both\" or a value.",
+             call.=FALSE);
     }
     else{
         constantValue <- as.complex(constant);
-        constant <- TRUE;
+        constant <- "both";
     }
 
     # Fixed parameters: all or nothing
@@ -112,7 +125,7 @@ carima <- function(y, orders=list(ar=0, i=0, ma=0), constant=FALSE, arma=NULL, m
         if(length(arma)!=orders$ar+orders$ma){
             stop("arma should contain all ", orders$ar+orders$ma, " AR/MA parameters.", call.=FALSE);
         }
-        if(constant && is.null(constantValue)){
+        if(constant!="none" && is.null(constantValue)){
             stop("The constant needs to be provided as a value when arma is provided, ",
                  "because clm() cannot estimate a part of the parameters.", call.=FALSE);
         }
@@ -134,7 +147,11 @@ carima <- function(y, orders=list(ar=0, i=0, ma=0), constant=FALSE, arma=NULL, m
     }
 
     # Estimate via clm
-    formula <- if(constant) y~1 else y~-1;
+    formula <- switch(constant,
+                      "none"=y~-1,
+                      "both"=y~1,
+                      "real"=y~1-Im(1),
+                      "imaginary"=y~1-Re(1));
     clmArgs <- c(list(formula=formula, data=data.frame(y=y), loss=loss, distribution=distribution,
                       orders=ordersVector, parameters=parameters),
                  ellipsis);
@@ -151,7 +168,8 @@ carima <- function(y, orders=list(ar=0, i=0, ma=0), constant=FALSE, arma=NULL, m
     ourModel$h <- h;
     ourModel$holdout <- holdout;
     ourModel$model <- paste0("cARIMA(", paste0(ordersVector, collapse=","), ")",
-                             ifelse(constant, " with constant", ""));
+                             switch(constant, "none"="", "both"=" with constant",
+                                    "real"=" with real constant", "imaginary"=" with imaginary constant"));
     class(ourModel) <- c("carima", class(ourModel));
 
     ourModel <- carimaFinalise(ourModel, h, holdout, if(holdout) holdoutData else NULL, silent);
@@ -208,7 +226,7 @@ carimaOrders <- function(orders){
 
 # Parameter names as clm produces them
 carimaNames <- function(orders, constant){
-    c(if(constant) "(Intercept)",
+    c(if(constant!="none") "(Intercept)",
       if(orders$ar>0) paste0("yLag", seq_len(orders$ar)),
       if(orders$ma>0) paste0("eLag", seq_len(orders$ma)));
 }

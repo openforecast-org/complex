@@ -4,18 +4,19 @@
 \alias{auto.carima}
 \title{Automatic Complex ARIMA}
 \usage{
-auto.carima(y, orders = list(ar = 3, i = 2, ma = 3), constant = NULL,
-  ic = c("AICc", "AIC", "BIC", "BICc"), search = c("stepwise", "full"),
-  distribution = c("dcnorm", "dcgnorm"), h = 0, holdout = FALSE,
-  silent = TRUE, fast = FALSE, ...)
+auto.carima(y, orders = list(ar = 3, i = 2, ma = 3), constant = c("auto",
+  "none", "real", "imaginary", "both"), ic = c("AICc", "AIC", "BIC", "BICc"),
+  search = c("stepwise", "full"), distribution = c("dcnorm", "dcgnorm"),
+  h = 0, holdout = FALSE, silent = TRUE, fast = FALSE, ...)
 }
 \arguments{
 \item{y}{vector or ts object with the complex-valued time series.}
 
 \item{orders}{list of maximum orders \code{list(ar=p, i=d, ma=q)} (or vector \code{c(p,d,q)}).}
 
-\item{constant}{if \code{NULL}, the function checks whether the constant is needed.
-Otherwise \code{TRUE} or \code{FALSE}.}
+\item{constant}{the constant of the model: \code{"auto"} (selected by the information
+criterion among the four options), or one of \code{"none"}, \code{"real"}, \code{"imaginary"},
+\code{"both"} (see \link[complex]{carima}).}
 
 \item{ic}{the information criterion used in the selection.}
 
@@ -59,11 +60,11 @@ With \code{search="stepwise"}:
 \item For each \eqn{d} from 0 to \code{orders$i}, the AR and MA orders are selected via a
 neighbourhood search (similar to Hyndman & Khandakar, 2008): starting from cARIMA(0,d,0),
 all models with p and q different by at most one are fitted, and the search moves to the best
-of them, as long as the information criterion improves. If \code{constant=NULL}, the constant
-is included for \eqn{d=0} and excluded otherwise;
-\item If \code{constant=NULL}, the best model of each \eqn{d} is re-estimated with the opposite
-option for the constant and the neighbourhood search continues from it. The best of all the
-estimated models is returned.
+of them, as long as the information criterion improves. If \code{constant="auto"}, the
+complex constant is included for \eqn{d=0} and excluded otherwise;
+\item If \code{constant="auto"}, the best model of each \eqn{d} is re-estimated with each of
+the other three options for the constant (none, real, imaginary, both), and the neighbourhood
+search continues from each of them. The best of all the estimated models is returned.
 }
 With \code{fast=TRUE}, all cARIMA(p,d,q) with and without constant are first estimated via
 the Hannan-Rissanen method (Hannan & Rissanen, 1982): the differences are regressed on their
@@ -76,8 +77,11 @@ model for each MA order is estimated. This is still an approximation: on wind da
 tails, \code{fast=TRUE} selected a model with an information criterion worse by 16 than
 the one found with \code{fast=FALSE}, while being about three times faster.
 
-With \code{search="full"}, all combinations of p, d, q and the constant are fitted
-(except for cARIMA(p,0,q) without constant when \code{constant=NULL}).
+With \code{search="full"}, all combinations of p, d, q and the constant are fitted.
+
+With a partial constant (\code{"real"} or \code{"imaginary"}), the Hannan-Rissanen estimates
+of the constant are restricted after the estimation, so the screening is more approximate for
+these models.
 
 Models with different orders of differencing and AR use different numbers of initial values,
 which \link[complex]{clm} constructs from the data. To make the information criteria

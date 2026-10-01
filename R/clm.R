@@ -11,7 +11,13 @@
 #'
 #' @param formula an object of class "formula" (or one that can be coerced to
 #' that class): a symbolic description of the model to be fitted. Can also include
-#' \code{trend}, which would add the global trend.
+#' \code{trend}, which would add the global trend. The intercept is complex by default
+#' (\code{y~x}) and is removed with \code{y~x-1}. It can also be restricted to one of its
+#' parts: \code{y~x-Im(1)} keeps only the real part of the intercept (its imaginary part is
+#' zero), and \code{y~x-Re(1)} only the imaginary part. For example, for the logarithm of wind
+#' with differences, \code{y~1-Im(1)} gives a drift in the log speed but not in the direction.
+#' A partial intercept is one real parameter, i.e. 1/2 in \code{nparam()}, and cannot be used
+#' with \code{loss="CLS"}.
 #' @param data a data frame or a matrix, containing the variables in the model.
 #' @param subset an optional vector specifying a subset of observations to be
 #' used in the fitting process.
@@ -168,6 +174,11 @@ clm <- function(formula, data, subset, na.action,
     cl <- match.call();
     # This is needed in order to have a reasonable formula saved, so that there are no issues with it
     cl$formula <- eval(cl$formula);
+    # A partial intercept (y~x-Im(1) or y~x-Re(1)) is read from the original formula. model.frame()
+    # would try to evaluate Im(1) as a variable, so the term is removed from the working formula.
+    # The formula argument itself keeps the environment of the caller (cl$formula is evaluated here)
+    formulaOriginal <- formula;
+    formula <- clmInterceptStrip(formula);
     # Keep the values of the other arguments rather than their expressions: vcov.clm()
     # re-estimates the model from this call in its own environment, where the variables of a
     # calling function (e.g. distribution=dist inside a wrapper) do not exist. data and subset are
@@ -211,6 +222,38 @@ clm <- function(formula, data, subset, na.action,
         }
     }
 
+    # Conversion between the complex parameters and the real-valued vector of the optimiser,
+    # c(Re(B), Im(B)). With a partial intercept (the first element of B), its fixed part (zero) is
+    # not in the real-valued vector.
+    BFixedIndex <- function(nComplex){
+        return(switch(interceptType, "real"=nComplex+1, "imaginary"=1, NULL));
+    }
+    BToReal <- function(B){
+        BReal <- c(Re(B),Im(B));
+        if(interceptPartial){
+            BReal <- BReal[-BFixedIndex(length(B))];
+        }
+        return(BReal);
+    }
+    BToComplex <- function(BReal){
+        if(interceptPartial){
+            nComplex <- (length(BReal)+1)/2;
+            BReal <- append(BReal, 0, after=BFixedIndex(nComplex)-1);
+        }
+        nComplex <- length(BReal)/2;
+        return(complex(real=BReal[seq_len(nComplex)], imaginary=BReal[nComplex+seq_len(nComplex)]));
+    }
+    # Sets the fixed part of the intercept to zero in a complex vector of parameters
+    BRestrict <- function(B){
+        if(interceptType=="real"){
+            B[1] <- Re(B[1]);
+        }
+        else if(interceptType=="imaginary"){
+            B[1] <- complex(real=0, imaginary=Im(B[1]));
+        }
+        return(B);
+    }
+
     # Function that calculates mean. Works faster than mean()
     meanFast <- function(x){
         return(sum(x) / length(x));
@@ -239,8 +282,10 @@ clm <- function(formula, data, subset, na.action,
 
         # If the vector B is not complex then it is estimated in nloptr. Make it complex
         if(!is.complex(B)){
-            nVariables <- length(B);
-            B <- complex(real=B[seq_len(nVariables/2)],imaginary=B[nVariables/2+seq_len(nVariables/2)]);
+            B <- BToComplex(B);
+        }
+        else if(interceptPartial){
+            B <- BRestrict(B);
         }
 
         # If there is ARIMA, then calculate polynomials
@@ -303,7 +348,7 @@ clm <- function(formula, data, subset, na.action,
     CF <- function(B, loss, y, matrixXreg){
         # If the shape is estimated, its logarithm is the last element of the real-valued vector
         shapeValue <- shape;
-        if(shapeEstimate && !is.complex(B) && length(B) %% 2 == 1){
+        if(shapeEstimate && !is.complex(B) && (length(B)+interceptPartial) %% 2 == 1){
             shapeValue <- exp(B[length(B)]);
             B <- B[-length(B)];
         }
@@ -313,13 +358,12 @@ clm <- function(formula, data, subset, na.action,
         # The check is skipped if the vector of parameters does not match the orders (this happens
         # in the re-estimation done by vcov.clm, where the MA columns are passed as regressors)
         if((arOrder>0 || maOrder>0) &&
-           (ifelse(is.complex(B), length(B), length(B)/2) == nVariablesExo+arOrder+maOrder)){
+           (ifelse(is.complex(B), length(B), (length(B)+interceptPartial)/2) == nVariablesExo+arOrder+maOrder)){
             if(is.complex(B)){
                 BComplex <- B;
             }
             else{
-                BComplex <- complex(real=B[seq_len(length(B)/2)],
-                                    imaginary=B[length(B)/2+seq_len(length(B)/2)]);
+                BComplex <- BToComplex(B);
             }
             rootsModuli <- c(if(arOrder>0) Mod(polyroot(c(1, -BComplex[nVariablesExo+seq_len(arOrder)]))),
                              if(maOrder>0) Mod(polyroot(c(1, BComplex[nVariablesExo+arOrder+seq_len(maOrder)]))));
@@ -393,7 +437,7 @@ clm <- function(formula, data, subset, na.action,
         }
 
         # Retransform the vector of parameters into a real-valued one
-        BReal <- c(Re(B),Im(B));
+        BReal <- BToReal(B);
         nVariables <- length(BReal);
         # The logarithm of the shape goes to the end of the vector
         if(shapeEstimate){
@@ -417,7 +461,7 @@ clm <- function(formula, data, subset, na.action,
         if(shapeEstimate){
             shapeValue <- exp(BReal[nVariables+1]);
         }
-        B[] <- complex(real=BReal[seq_len(nVariables/2)],imaginary=BReal[nVariables/2+seq_len(nVariables/2)]);
+        B[] <- BToComplex(BReal[seq_len(nVariables)]);
         nVariables <- length(B);
         CFValue <- res$objective;
 
@@ -528,6 +572,7 @@ clm <- function(formula, data, subset, na.action,
     mf <- mf[c(1L, m)];
     mf$drop.unused.levels <- TRUE;
     mf[[1L]] <- quote(stats::model.frame);
+    mf$formula <- formula;
 
     # If data is provided explicitly, check it
     if(exists("data",inherits=FALSE,mode="numeric") || exists("data",inherits=FALSE,mode="complex") ||
@@ -620,6 +665,17 @@ clm <- function(formula, data, subset, na.action,
     cl$formula <- formula(dataTerms);
 
     interceptIsNeeded <- attr(dataTerms,"intercept")!=0;
+    # Partial intercept: y~x-Im(1) keeps only its real part, y~x-Re(1) only the imaginary one.
+    # terms() ignores these (removing a term that is not there), so they are read from the formula
+    interceptType <- clmInterceptType(formulaOriginal, interceptIsNeeded);
+    interceptPartial <- any(interceptType==c("real","imaginary"));
+    if(interceptPartial){
+        cl$formula <- clmInterceptFormula(cl$formula, interceptType);
+        if(loss=="CLS"){
+            stop("A partial intercept cannot be used with loss=\"CLS\": the loss is complex-valued ",
+                 "and the restricted parameters need to be estimated numerically.", call.=FALSE);
+        }
+    }
     # Create a model from the provided stuff. This way we can work with factors
     dataWork <- model.matrix(dataWork, data=dataWork);
     # And this small function will do all necessary transformations of complex variables
@@ -953,7 +1009,8 @@ clm <- function(formula, data, subset, na.action,
                 B <- as.vector(invert(t(Conj(matrixXregForDiffs)) %*% matrixXregForDiffs) %*%
                                    t(Conj(matrixXregForDiffs)) %*% diff(y,differences=iOrder));
             }
-            if(maOrderUsed){
+            # The closed form ignores the partial intercept, so it is only the starting point then
+            if(maOrderUsed || interceptPartial){
                 # Add initial values for the maOrder
                 B <- c(B, rep(0.1*(1+1i),maOrder));
                 hrValues <- hrStart();
@@ -1079,7 +1136,8 @@ clm <- function(formula, data, subset, na.action,
     errors[] <- extractorResiduals(mu, yFitted);
 
     # Parameters are counted per series: 3/2 for the covariance matrix, 1/2 for the shape
-    nParam <- nVariables + (loss=="likelihood")*3/2 + shapeEstimate/2;
+    # A partial intercept has one real parameter, i.e. 1/2 per series
+    nParam <- nVariables - interceptPartial/2 + (loss=="likelihood")*3/2 + shapeEstimate/2;
 
     if(interceptIsNeeded){
         # This shit is needed, because R has habit of converting everything into vectors...
@@ -1112,6 +1170,8 @@ clm <- function(formula, data, subset, na.action,
             modelName <- paste0("cARIMAX(",orders[1],",",orders[2],",",orders[3],")");
         }
     }
+
+    ellipsis$intercept <- interceptType;
 
     #### Return the model ####
     finalModel <- structure(list(coefficients=parameters, FI=FI, fitted=yFitted, residuals=as.vector(errors),
@@ -1372,6 +1432,14 @@ vcov.clm <- function(object, type=NULL, ...){
         newCall$loss <- "likelihood";
         newCall$orders <- object$other$orders;
         newCall$parameters <- c(Re(coef(object)),Im(coef(object)));
+        # A partial intercept: its fixed part is not a parameter, and the formula keeps the restriction
+        interceptType <- object$other$intercept;
+        fixedIndex <- switch(ifelse(is.null(interceptType), "both", interceptType),
+                             "real"=nVariables+1, "imaginary"=1, NULL);
+        if(!is.null(fixedIndex)){
+            newCall$parameters <- newCall$parameters[-fixedIndex];
+            newCall$formula <- clmInterceptFormula(newCall$formula, interceptType);
+        }
         newCall$scale <- object$scale;
         # The shape of dcgnorm is fixed at its estimate: the Hessian is for B given the shape
         if(!is.null(object$distribution) && object$distribution=="dcgnorm"){
@@ -1396,19 +1464,16 @@ vcov.clm <- function(object, type=NULL, ...){
         }
 
         # Take inverse of the matrix
-        vcovMatrixTry <- try(solve(FIMatrix, diag(nVariables*2), tol=1e-20), silent=TRUE);
+        vcovMatrixTry <- try(solve(FIMatrix, diag(ncol(FIMatrix)), tol=1e-20), silent=TRUE);
         if(inherits(vcovMatrixTry,"try-error")){
-            vcov <- diag(1e+100,nVariables*2);
-            rownames(vcov) <- rep(parametersNames,2);
+            vcovMatrixTry <- diag(1e+100,ncol(FIMatrix));
         }
-        else{
-            vcov <- vcovMatrixTry;
-        }
-        ndimVcovHalf <- ncol(vcov)/2;
+        # The fixed part of a partial intercept has zero variance
+        vcov <- matrix(0, nVariables*2, nVariables*2);
+        parametersIndex <- setdiff(seq_len(nVariables*2), fixedIndex);
+        vcov[parametersIndex,parametersIndex] <- vcovMatrixTry;
 
-        rownames(vcov)[1:ndimVcovHalf] <- paste0(rownames(vcov)[1:ndimVcovHalf],"_r");
-        rownames(vcov)[ndimVcovHalf+1:ndimVcovHalf] <- paste0(rownames(vcov)[ndimVcovHalf+1:ndimVcovHalf],"_i");
-        colnames(vcov) <- rownames(vcov);
+        rownames(vcov) <- colnames(vcov) <- c(paste0(parametersNames,"_r"), paste0(parametersNames,"_i"));
 
         # Change the order of parameteres
         parametersNamesAllComplex <- paste0(rep(parametersNames,each=2),c("_r","_i"));
@@ -1486,6 +1551,12 @@ summary.clm <- function(object, level=0.95, ...){
     parametersTableRownames <- names(parameters)
     rownames(parametersTable) <- parametersTableRownames;
     colnames(parametersTable) <- parametersTableColnames;
+
+    # The fixed part of a partial intercept is not a parameter
+    fixedName <- switch(ifelse(is.null(object$other$intercept), "both", object$other$intercept),
+                        "real"="(Intercept)_i", "imaginary"="(Intercept)_r", NULL);
+    parametersTable <- parametersTable[rownames(parametersTable)!=ifelse(is.null(fixedName), "", fixedName),,
+                                       drop=FALSE];
 
     ourReturn <- list(coefficients=parametersTable);
 
@@ -1834,4 +1905,72 @@ plot.predict.clm <- function(x, ...){
     class(x) <- "legion";
 
     plot(x, which=7, ...);
+}
+
+# Type of the intercept of clm() from its formula: "both" (complex), "real" (y~x-Im(1)),
+# "imaginary" (y~x-Re(1)) or "none" (y~x-1).
+clmInterceptType <- function(formula, interceptIsNeeded){
+    removed <- character(0);
+    findRemoved <- function(expression){
+        if(is.call(expression)){
+            if(identical(expression[[1]], as.name("-")) && length(expression)==3){
+                term <- expression[[3]];
+                if(is.call(term) && length(term)==2 && identical(term[[2]], 1) &&
+                   any(as.character(term[[1]])==c("Re","Im"))){
+                    removed <<- c(removed, as.character(term[[1]]));
+                }
+            }
+            for(argument in as.list(expression)[-1]){
+                findRemoved(argument);
+            }
+        }
+    }
+    findRemoved(formula[[length(formula)]]);
+    if(!interceptIsNeeded){
+        return("none");
+    }
+    if(all(c("Re","Im") %in% removed)){
+        stop("Both parts of the intercept are removed. Use y~x-1 to exclude the intercept.", call.=FALSE);
+    }
+    if(any(removed=="Im")){
+        return("real");
+    }
+    if(any(removed=="Re")){
+        return("imaginary");
+    }
+    return("both");
+}
+
+# Adds the partial intercept term to a formula produced by terms(), which drops it
+clmInterceptFormula <- function(formula, interceptType){
+    if(!any(interceptType==c("real","imaginary"))){
+        return(formula);
+    }
+    formulaEnvironment <- environment(formula);
+    formula <- as.formula(paste0(paste0(deparse(formula, width.cutoff=500L), collapse=""),
+                                 ifelse(interceptType=="real", " - Im(1)", " - Re(1)")));
+    environment(formula) <- formulaEnvironment;
+    return(formula);
+}
+
+# Removes the partial intercept terms (-Im(1), -Re(1)) from a formula
+clmInterceptStrip <- function(formula){
+    strip <- function(expression){
+        if(!is.call(expression)){
+            return(expression);
+        }
+        if(identical(expression[[1]], as.name("-")) && length(expression)==3){
+            term <- expression[[3]];
+            if(is.call(term) && length(term)==2 && identical(term[[2]], 1) &&
+               any(as.character(term[[1]])==c("Re","Im"))){
+                return(strip(expression[[2]]));
+            }
+        }
+        for(i in seq_along(expression)[-1]){
+            expression[[i]] <- strip(expression[[i]]);
+        }
+        return(expression);
+    }
+    formula[[length(formula)]] <- strip(formula[[length(formula)]]);
+    return(formula);
 }

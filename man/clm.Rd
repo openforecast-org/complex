@@ -21,7 +21,13 @@ clm(formula, data, subset, na.action, loss = c("likelihood", "OLS", "CLS",
 \arguments{
 \item{formula}{an object of class "formula" (or one that can be coerced to
 that class): a symbolic description of the model to be fitted. Can also include
-\code{trend}, which would add the global trend.}
+\code{trend}, which would add the global trend. The intercept is complex by default
+(\code{y~x}) and is removed with \code{y~x-1}. It can also be restricted to one of its
+parts: \code{y~x-Im(1)} keeps only the real part of the intercept (its imaginary part is
+zero), and \code{y~x-Re(1)} only the imaginary part. For example, for the logarithm of wind
+with differences, \code{y~1-Im(1)} gives a drift in the log speed but not in the direction.
+A partial intercept is one real parameter, i.e. 1/2 in \code{nparam()}, and cannot be used
+with \code{loss="CLS"}.}
 
 \item{data}{a data frame or a matrix, containing the variables in the model.}
 

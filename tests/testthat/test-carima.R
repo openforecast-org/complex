@@ -14,7 +14,7 @@ test_that("carima() gives the same model as clm() without intercept", {
 })
 
 test_that("orders can be a list and the constant is included when asked", {
-    model <- carima(y, orders=list(i=1, ma=1), constant=TRUE)
+    model <- carima(y, orders=list(i=1, ma=1), constant="both")
     modelClm <- clm(y~1, data.frame(y=y), orders=c(0,1,1))
     expect_equal(unname(coef(model)), unname(coef(modelClm)))
     expect_error(carima(y, orders=list(ar=c(1,1))), "non-seasonal")
@@ -37,7 +37,8 @@ test_that("model and arma reuse parameters without estimation", {
     expect_equal(coef(modelReused), coef(model))
     modelFixed <- carima(y, orders=c(0,1,1), arma=list(ma=0.5-0.2i))
     expect_equal(unname(coef(modelFixed)), 0.5-0.2i)
-    expect_error(carima(y, orders=c(0,1,1), constant=TRUE, arma=list(ma=0.5)), "constant")
+    expect_error(carima(y, orders=c(0,1,1), constant="both", arma=list(ma=0.5)), "constant")
+    expect_error(carima(y, orders=c(0,1,1), constant=TRUE), "constant")
     expect_error(carima(y, orders=c(1,1,1), arma=list(ma=0.5)), "all")
 })
 

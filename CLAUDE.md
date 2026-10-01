@@ -53,7 +53,10 @@ Match the existing code: 4-space indentation, `;` at the end of statements, `if(
 ## clm() internals worth knowing
 
 - Parameters `B` are complex (intercept, regressors, AR, MA). The optimiser (nloptr, SBPLX by default)
-  works on `c(Re(B), Im(B))`; for `distribution="dcgnorm"` with estimated shape, log(shape) is
+  works on `c(Re(B), Im(B))`, converted only via `BToReal()`/`BToComplex()` inside clm: with a partial
+  intercept (`y~x-Im(1)` / `y~x-Re(1)`, type in `object$other$intercept`) the fixed part of the
+  intercept is left out of the real vector. The partial term is stripped (`clmInterceptStrip()`)
+  before `model.frame()`, which would otherwise evaluate `Im(1)` as a variable; for `distribution="dcgnorm"` with estimated shape, log(shape) is
   appended at the end. A starting shape can be passed as the last element of `B`.
 - The ARI part is stored via the polynomial `(1-phi(B))(1-B)^d`; `fitter()` builds the full
   parameter vector. Initial lags are extrapolated (`xregExpander(gaps="auto")`), initial MA errors

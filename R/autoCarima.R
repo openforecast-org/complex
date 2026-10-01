@@ -10,11 +10,11 @@
 #' \item For each \eqn{d} from 0 to \code{orders$i}, the AR and MA orders are selected via a
 #' neighbourhood search (similar to Hyndman & Khandakar, 2008): starting from cARIMA(0,d,0),
 #' all models with p and q different by at most one are fitted, and the search moves to the best
-#' of them, as long as the information criterion improves. If \code{constant=NULL}, the constant
-#' is included for \eqn{d=0} and excluded otherwise;
-#' \item If \code{constant=NULL}, the best model of each \eqn{d} is re-estimated with the opposite
-#' option for the constant and the neighbourhood search continues from it. The best of all the
-#' estimated models is returned.
+#' of them, as long as the information criterion improves. If \code{constant="auto"}, the
+#' complex constant is included for \eqn{d=0} and excluded otherwise;
+#' \item If \code{constant="auto"}, the best model of each \eqn{d} is re-estimated with each of
+#' the other three options for the constant (none, real, imaginary, both), and the neighbourhood
+#' search continues from each of them. The best of all the estimated models is returned.
 #' }
 #' With \code{fast=TRUE}, all cARIMA(p,d,q) with and without constant are first estimated via
 #' the Hannan-Rissanen method (Hannan & Rissanen, 1982): the differences are regressed on their
@@ -27,8 +27,11 @@
 #' tails, \code{fast=TRUE} selected a model with an information criterion worse by 16 than
 #' the one found with \code{fast=FALSE}, while being about three times faster.
 #'
-#' With \code{search="full"}, all combinations of p, d, q and the constant are fitted
-#' (except for cARIMA(p,0,q) without constant when \code{constant=NULL}).
+#' With \code{search="full"}, all combinations of p, d, q and the constant are fitted.
+#'
+#' With a partial constant (\code{"real"} or \code{"imaginary"}), the Hannan-Rissanen estimates
+#' of the constant are restricted after the estimation, so the screening is more approximate for
+#' these models.
 #'
 #' Models with different orders of differencing and AR use different numbers of initial values,
 #' which \link[complex]{clm} constructs from the data. To make the information criteria
@@ -46,8 +49,9 @@
 #'
 #' @param y vector or ts object with the complex-valued time series.
 #' @param orders list of maximum orders \code{list(ar=p, i=d, ma=q)} (or vector \code{c(p,d,q)}).
-#' @param constant if \code{NULL}, the function checks whether the constant is needed.
-#' Otherwise \code{TRUE} or \code{FALSE}.
+#' @param constant the constant of the model: \code{"auto"} (selected by the information
+#' criterion among the four options), or one of \code{"none"}, \code{"real"}, \code{"imaginary"},
+#' \code{"both"} (see \link[complex]{carima}).
 #' @param ic the information criterion used in the selection.
 #' @param search \code{"stepwise"} for the neighbourhood search or \code{"full"} for all the
 #' combinations of orders.
@@ -92,7 +96,8 @@
 #'
 #' @rdname auto.carima
 #' @export
-auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
+auto.carima <- function(y, orders=list(ar=3, i=2, ma=3),
+                        constant=c("auto","none","real","imaginary","both"),
                         ic=c("AICc","AIC","BIC","BICc"), search=c("stepwise","full"),
                         distribution=c("dcnorm","dcgnorm"),
                         h=0, holdout=FALSE, silent=TRUE, fast=FALSE, ...){
@@ -100,6 +105,7 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
     ic <- match.arg(ic);
     search <- match.arg(search);
     distribution <- match.arg(distribution);
+    constant <- match.arg(constant);
     ellipsis <- list(...);
     # The starting values are set by the function
     ellipsis$B <- NULL;
@@ -154,8 +160,8 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
         coefs <- coef(model);
         pFrom <- model$orders$ar;
         qFrom <- model$orders$ma;
-        k <- as.integer(model$constant);
-        start <- c(if(constant) {if(model$constant) coefs[1] else 0+0i},
+        k <- as.integer(model$constant!="none");
+        start <- c(if(constant!="none") {if(k==1) coefs[1] else 0+0i},
                    coefs[k+seq_len(min(p, pFrom))], rep(0+0i, max(p-pFrom, 0)),
                    coefs[k+pFrom+seq_len(min(q, qFrom))], rep(0+0i, max(q-qFrom, 0)));
         if(distribution=="dcgnorm" && isTRUE(model$other$shapeEstimated)){
@@ -195,13 +201,14 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
         }
         estimated[[key]] <<- result;
         if(!silent){
-            cat("cARIMA(", p, ",", d, ",", q, ")", ifelse(constant, " with constant", ""),
+            cat("cARIMA(", p, ",", d, ",", q, ")", constantLabel(constant),
                 ": ", round(result$IC, 3), "\n", sep="");
         }
         return(result);
     }
 
-    constantOptions <- if(is.null(constant)) c(FALSE, TRUE) else constant;
+    constantTypes <- c("none","real","imaginary","both");
+    constantOptions <- if(constant=="auto") constantTypes else constant;
 
     #### Screening via Hannan-Rissanen (fast=TRUE) ####
     # For each d and constant, all cARIMA(p,d,q) are estimated via Hannan-Rissanen (complex least
@@ -234,33 +241,34 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
         screenRows <- list();
         for(d in 0:iMax){
             for(constantValue in constantOptions){
-                if(d==0 && !constantValue && is.null(constant)){
-                    next;
-                }
+                constantIncluded <- constantValue!="none";
                 u <- as.vector(if(d>0) diff(y, differences=d) else y);
-                errors <- if(maMax>0) tryCatch(hrErrors(u, constantValue), error=function(e) NULL) else NULL;
+                errors <- if(maMax>0) tryCatch(hrErrors(u, constantIncluded), error=function(e) NULL) else NULL;
                 for(p in 0:arMax){
                     for(q in 0:maMax){
                         key <- modelKey(p, d, q, constantValue);
                         ICValue <- Inf;
                         estimates <- NULL;
                         if(q==0 || !is.null(errors)){
-                            estimates <- tryCatch(hannanRissanen(u, p, q, constantValue, errors),
+                            estimates <- tryCatch(hannanRissanen(u, p, q, constantIncluded, errors),
                                                   error=function(e) NULL);
+                            if(!is.null(estimates)){
+                                estimates$constant <- constantRestrict(estimates$constant, constantValue);
+                            }
                         }
                         if(!is.null(estimates) &&
                            (length(estimates$ar)==0 || all(Mod(polyroot(c(1, -estimates$ar)))>1)) &&
                            (length(estimates$ma)==0 || all(Mod(polyroot(c(1, estimates$ma)))>1))){
                             residualsHR <- c(rep(NA_complex_, d),
                                              armaResiduals(u, estimates$constant, estimates$ar, estimates$ma));
-                            screenValues <- screenIC(residualsHR, as.integer(constantValue) + p + q);
+                            screenValues <- screenIC(residualsHR, constantParameters(constantValue) + p + q);
                             ICValue <- screenValues$IC;
                         }
                         screenRows[[key]] <- data.frame(p=p, d=d, q=q, constant=constantValue,
                                                         IC=ICValue, key=key);
                         if(!silent){
                             cat("Hannan-Rissanen cARIMA(", p, ",", d, ",", q, ")",
-                                ifelse(constantValue, " with constant", ""), ": ", round(ICValue, 3),
+                                constantLabel(constantValue), ": ", round(ICValue, 3),
                                 "\n", sep="");
                         }
                     }
@@ -327,9 +335,6 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
     else if(search=="full"){
         for(d in 0:iMax){
             for(constantValue in constantOptions){
-                if(d==0 && !constantValue && is.null(constant)){
-                    next;
-                }
                 # By level p+q, so that each model can start from the nested ones
                 for(level in 0:(arMax+maMax)){
                     for(p in 0:arMax){
@@ -355,7 +360,7 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
         # for d=0 and excluded for d>0 (unless it is provided), and is tested at the end.
         bestPerDiff <- vector("list", iMax+1);
         for(d in 0:iMax){
-            constantValue <- if(is.null(constant)) (d==0) else constant;
+            constantValue <- if(constant=="auto") ifelse(d==0, "both", "none") else constant;
             if(!silent){
                 cat("Searching AR and MA orders with d=", d, "...\n", sep="");
             }
@@ -366,21 +371,27 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
             bestPerDiff[[d+1]] <- best;
         }
 
-        # Test the constant on the best model of each d, and continue the search from there:
-        # e.g. a random walk with drift is otherwise missed, when the search without constant
-        # compensates the drift with MA terms
-        if(is.null(constant)){
+        # Test the other constants on the best model of each d, and continue the search from the
+        # best of them: e.g. a random walk with drift is otherwise missed, when the search without
+        # constant compensates the drift with MA terms
+        if(constant=="auto"){
             if(!silent){
                 cat("Testing the constant...\n");
             }
             for(d in 0:iMax){
                 bestPerD <- bestPerDiff[[d+1]];
                 if(!is.null(bestPerD$model)){
-                    constantValue <- !bestPerD$model$constant;
-                    flipped <- fitCandidate(bestPerD$model$orders$ar, d, bestPerD$model$orders$ma,
-                                            constantValue, list(bestPerD$model));
-                    if(!is.null(flipped$model)){
-                        neighbourhoodSearch(flipped, d, constantValue);
+                    alternatives <- setdiff(constantTypes, bestPerD$model$constant);
+                    others <- lapply(alternatives, function(constantValue){
+                        fitCandidate(bestPerD$model$orders$ar, d, bestPerD$model$orders$ma,
+                                     constantValue, list(bestPerD$model));
+                    });
+                    # The search continues from each of them: the constant can change the best
+                    # orders (e.g. a random walk with drift)
+                    for(i in seq_along(others)){
+                        if(!is.null(others[[i]]$model)){
+                            neighbourhoodSearch(others[[i]], d, alternatives[i]);
+                        }
                     }
                 }
             }
@@ -396,7 +407,7 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
 
     ICsTable <- do.call(rbind, lapply(strsplit(names(estimated), " "), function(x){
         data.frame(p=as.integer(x[1]), d=as.integer(x[2]), q=as.integer(x[3]),
-                   constant=as.logical(x[4]));
+                   constant=x[4]);
     }));
     ICsTable[[ic]] <- ICs;
     ICsTable <- ICsTable[order(ICsTable[[ic]]),];
@@ -414,4 +425,24 @@ auto.carima <- function(y, orders=list(ar=3, i=2, ma=3), constant=NULL,
     bestModel <- carimaFinalise(bestModel, h, holdout, holdoutData, silent);
 
     return(bestModel);
+}
+
+# Label of the constant for the printed output
+constantLabel <- function(constant){
+    return(switch(constant, "none"="", "both"=" with constant",
+                  "real"=" with real constant", "imaginary"=" with imaginary constant"));
+}
+
+# Number of parameters of the constant per series (complex units)
+constantParameters <- function(constant){
+    return(switch(constant, "none"=0, "both"=1, "real"=0.5, "imaginary"=0.5));
+}
+
+# Restricts a complex constant to its real or imaginary part
+constantRestrict <- function(value, constant){
+    if(is.null(value)){
+        return(value);
+    }
+    return(switch(constant, "real"=complex(real=Re(value), imaginary=0),
+                  "imaginary"=complex(real=0, imaginary=Im(value)), value));
 }

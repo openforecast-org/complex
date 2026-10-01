@@ -5,10 +5,11 @@
 \alias{forecast.carima}
 \title{Complex ARIMA}
 \usage{
-carima(y, orders = list(ar = 0, i = 0, ma = 0), constant = FALSE,
-  arma = NULL, model = NULL, loss = c("likelihood", "OLS", "CLS", "MSE",
-  "MAE", "HAM"), distribution = c("dcnorm", "dcgnorm"), h = 0,
-  holdout = FALSE, silent = TRUE, ...)
+carima(y, orders = list(ar = 0, i = 0, ma = 0), constant = c("none",
+  "real", "imaginary", "both"), arma = NULL, model = NULL,
+  loss = c("likelihood", "OLS", "CLS", "MSE", "MAE", "HAM"),
+  distribution = c("dcnorm", "dcgnorm"), h = 0, holdout = FALSE,
+  silent = TRUE, ...)
 
 \method{forecast}{carima}(object, h = 10, interval = c("none",
   "confidence", "prediction"), level = 0.95, ...)
@@ -19,9 +20,11 @@ carima(y, orders = list(ar = 0, i = 0, ma = 0), constant = FALSE,
 \item{orders}{orders of the model: either a vector \code{c(p,d,q)} or a list
 \code{list(ar=p, i=d, ma=q)} (elements that are not provided are set to zero).}
 
-\item{constant}{if \code{TRUE}, the constant term is included in the model and estimated.
-Can also be a complex number (the value of the constant), in which case all the other
-parameters need to be provided via \code{arma}.}
+\item{constant}{which constant to include: \code{"none"}, \code{"real"} (the real part only,
+the imaginary part is zero), \code{"imaginary"} (the imaginary part only) or \code{"both"}
+(a complex constant). In \link[complex]{clm} these correspond to the formulae \code{y~-1},
+\code{y~1-Im(1)}, \code{y~1-Re(1)} and \code{y~1}. Can also be a complex number (the value of
+the constant), in which case all the other parameters need to be provided via \code{arma}.}
 
 \item{arma}{list \code{list(ar=..., ma=...)} or a vector (AR parameters followed by MA ones)
 with the fixed complex AR/MA parameters. All of them need to be provided; the model is then
@@ -57,7 +60,8 @@ An object of the class \code{c("carima","clm","greybox")}: the model returned by
 \link[complex]{clm}, plus
 \itemize{
 \item \code{orders} - the list of orders,
-\item \code{constant} - whether the constant is included,
+\item \code{constant} - the type of the constant (\code{"none"}, \code{"real"},
+\code{"imaginary"} or \code{"both"}),
 \item \code{h}, \code{holdout} - the horizon and the holdout flag,
 \item \code{forecast} - the point forecasts (if \code{h>0}),
 \item \code{holdoutData} - the held-out values (if \code{holdout=TRUE}),
@@ -73,8 +77,10 @@ without explanatory variables. It is a wrapper of \link[complex]{clm}.
 \details{
 The model is
 \deqn{(1-\phi_1 B-\dots-\phi_p B^p)(1-B)^d y_t = c + (1+\theta_1 B+\dots+\theta_q B^q)\epsilon_t ,}
-where all the parameters are complex and \eqn{c} is the constant (included only when
-\code{constant} is not \code{FALSE}). With \code{d>0} the constant acts as a drift.
+where all the parameters are complex and \eqn{c} is the constant (included unless
+\code{constant="none"}). With \code{d>0} the constant acts as a drift. The constant can also
+be restricted to its real or imaginary part (e.g. for the logarithm of wind,
+\code{constant="real"} gives a drift in the log speed but not in the direction).
 
 Only the non-seasonal model is supported. Parameters are estimated via \link[complex]{clm},
 so its restrictions apply: the first lags are extrapolated and the first MA errors are set to
@@ -86,6 +92,8 @@ set.seed(41)
 e <- rcnorm(200, 0, sigma2=1, varsigma2=0.3+0.2i)
 y <- cumsum(e + c(0, 0.5*e[-200]))
 model <- carima(y, orders=c(0,1,1), h=10, holdout=TRUE)
+# Drift in the real part only
+carima(y, orders=c(0,1,1), constant="real")
 summary(model)
 model$accuracy
 forecast(model, h=5)
