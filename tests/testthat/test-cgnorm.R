@@ -3,7 +3,7 @@
 test_that("dcgnorm with shape=1 equals dcnorm", {
     set.seed(41)
     z <- rcnorm(20, 1+1i, sigma2=2, varsigma2=0.6+0.8i)
-    expect_equal(dcgnorm(z, 1+1i, scale=2, pseudoscale=0.6+0.8i, shape=1, log=TRUE),
+    expect_equal(dcgnorm(z, 1+1i, scaleConjugate=2, scaleDirect=0.6+0.8i, shape=1, log=TRUE),
                  dcnorm(z, 1+1i, sigma2=2, varsigma2=0.6+0.8i, log=TRUE),
                  tolerance=1e-12)
 })
@@ -13,7 +13,7 @@ test_that("dcgnorm integrates to one", {
     step <- diff(grid)[1]
     z <- outer(grid, 1i*grid, "+")
     for(shape in c(0.5, 1, 2)){
-        expect_equal(sum(dcgnorm(z, 0, scale=2, pseudoscale=0.6+0.8i, shape=shape))*step^2,
+        expect_equal(sum(dcgnorm(z, 0, scaleConjugate=2, scaleDirect=0.6+0.8i, shape=shape))*step^2,
                      1, tolerance=1e-3)
     }
 })
@@ -21,15 +21,15 @@ test_that("dcgnorm integrates to one", {
 test_that("rcgnorm has the right covariance and radial distribution", {
     set.seed(41)
     shape <- 0.5
-    scale <- 2
-    pseudoscale <- 0.6+0.8i
-    z <- rcgnorm(50000, 0, scale, pseudoscale, shape)
-    # Variance and pseudo-variance are the scale and pseudo-scale times this factor
+    scaleConjugate <- 2
+    scaleDirect <- 0.6+0.8i
+    z <- rcgnorm(50000, 0, scaleConjugate, scaleDirect, shape)
+    # Conjugate and direct variances are the conjugate and direct scales times this factor
     multiplier <- 2^(1/shape)*gamma(2/shape)/(2*gamma(1/shape))
-    expect_equal(mean(Mod(z)^2), multiplier*scale, tolerance=0.05)
-    expect_equal(mean(z^2), multiplier*pseudoscale, tolerance=0.05)
+    expect_equal(mean(Mod(z)^2), multiplier*scaleConjugate, tolerance=0.05)
+    expect_equal(mean(z^2), multiplier*scaleDirect, tolerance=0.05)
     # Q^shape follows Gamma(1/shape, scale=2)
-    quadraticForm <- 2*(scale*Mod(z)^2 - Re(Conj(pseudoscale)*z^2))/(scale^2-Mod(pseudoscale)^2)
+    quadraticForm <- 2*(scaleConjugate*Mod(z)^2 - Re(Conj(scaleDirect)*z^2))/(scaleConjugate^2-Mod(scaleDirect)^2)
     expect_gt(suppressWarnings(ks.test(quadraticForm^shape, "pgamma", shape=1/shape, scale=2)$p.value),
               0.001)
 })
@@ -39,13 +39,13 @@ test_that("the concentrated likelihood matches the density at the estimated scal
     e <- rcgnorm(2000, 0, 2, 0.6+0.8i, 0.5)
     values <- complex:::cgnormConcentrated(e, 0.5)
     expect_equal(values$logLik,
-                 sum(dcgnorm(e, 0, values$scale, values$pseudoscale, 0.5, log=TRUE)))
+                 sum(dcgnorm(e, 0, values$scaleConjugate, values$scaleDirect, 0.5, log=TRUE)))
 })
 
 # cAR(1) with heavy-tailed errors
 set.seed(41)
 obs <- 2100
-e <- rcgnorm(obs, 0, scale=4, pseudoscale=1+1i, shape=0.5)
+e <- rcgnorm(obs, 0, scaleConjugate=4, scaleDirect=1+1i, shape=0.5)
 y <- vector("complex", obs)
 y[1] <- 10+5i + e[1]
 for(i in 2:obs){

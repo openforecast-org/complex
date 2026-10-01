@@ -59,7 +59,8 @@ Match the existing code: 4-space indentation, `;` at the end of statements, `if(
   parameter vector. Initial lags are extrapolated (`xregExpander(gaps="auto")`), initial MA errors
   are zero; all observations enter the likelihood.
 - Likelihood `dcnorm`: concentrated, `-T(log 2pi + 1 + 0.5 log det Sigma)`. `dcgnorm`: circularity
-  from moments, scale by exact ML given it (approximate ML for shape != 1).
+  from moments, conjugate scale by exact ML given it (approximate ML for shape != 1); `object$scale`
+  is `c(scaleConjugate, scaleDirect)`.
 - The loss returns `1E+100/min|root|` if the complex AR or MA polynomial has a root inside the unit
   circle (differencing is not checked).
 - `nparam()` counts per series (complex units: covariance 3/2, shape 1/2). `logLik` df and the ICs

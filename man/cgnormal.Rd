@@ -6,19 +6,21 @@
 \alias{rcgnorm}
 \title{Complex Generalised Normal Distribution}
 \usage{
-dcgnorm(q, mu = 0, scale = 1, pseudoscale = 0, shape = 1,
+dcgnorm(q, mu = 0, scaleConjugate = 1, scaleDirect = 0, shape = 1,
   log = FALSE)
 
-rcgnorm(n = 1, mu = 0, scale = 1, pseudoscale = 0, shape = 1)
+rcgnorm(n = 1, mu = 0, scaleConjugate = 1, scaleDirect = 0,
+  shape = 1)
 }
 \arguments{
 \item{q}{vector of quantiles (complex).}
 
 \item{mu}{vector of location parameters (complex).}
 
-\item{scale}{scale parameter (real, positive).}
+\item{scaleConjugate}{conjugate scale parameter (real, positive).}
 
-\item{pseudoscale}{pseudo-scale parameter (complex, with the modulus smaller than scale).}
+\item{scaleDirect}{direct scale parameter (complex, with the modulus smaller than
+\code{scaleConjugate}).}
 
 \item{shape}{shape parameter (real, positive).}
 
@@ -33,33 +35,34 @@ complex random values.
 \description{
 Density and random generation for the complex generalised normal distribution
 (also known as the complex generalised Gaussian or the bivariate exponential power
-distribution) with location \code{mu}, scale \code{scale}, pseudo-scale
-\code{pseudoscale} and shape \code{shape}.
+distribution) with location \code{mu}, conjugate scale \code{scaleConjugate}, direct scale
+\code{scaleDirect} and shape \code{shape}.
 }
 \details{
 For the error term \eqn{e = z - \mu}, the density is
 \deqn{f(z) = \frac{2\beta}{\pi \Gamma(1/\beta) 2^{1/\beta} \sqrt{\alpha^4 - |\psi^2|^2}}
 \exp\left(-\frac{1}{2} Q^\beta\right),}
 where \eqn{Q = 2(\alpha^2 |e|^2 - \Re(\overline{\psi^2} e^2)) / (\alpha^4 - |\psi^2|^2)},
-\eqn{\alpha^2} is the scale, \eqn{\psi^2} is the pseudo-scale and \eqn{\beta} is the shape.
+\eqn{\alpha^2} is the conjugate scale, \eqn{\psi^2} is the direct scale and \eqn{\beta} is the
+shape.
 
-With \code{shape=1} this is the complex normal distribution with variance \code{scale} and
-pseudo-variance \code{pseudoscale} (see \link[complex]{dcnorm}). Values of shape below one
+With \code{shape=1} this is the complex normal distribution with conjugate variance
+\code{scaleConjugate} and direct variance \code{scaleDirect} (see \link[complex]{dcnorm}). Values of shape below one
 give heavier tails (\code{shape=0.5} is Laplace-like), values above one give lighter tails
 (the uniform distribution on an ellipse in the limit). Note that the shape here applies to
 the quadratic form, so \code{shape=1} corresponds to \code{shape=2} in
 \link[greybox]{dgnorm}.
 
-The variance and the pseudo-variance of the distribution equal \code{scale} and
-\code{pseudoscale} multiplied by \eqn{2^{1/\beta} \Gamma(2/\beta) / (2 \Gamma(1/\beta))}.
+The conjugate and the direct variances of the distribution equal \code{scaleConjugate} and
+\code{scaleDirect} multiplied by \eqn{2^{1/\beta} \Gamma(2/\beta) / (2 \Gamma(1/\beta))}.
 
 Random numbers are generated using the fact that \eqn{Q^\beta} follows the Gamma distribution
 with shape \eqn{1/\beta} and scale 2, and the angle is uniform in the standardised space.
 }
 \examples{
-x <- rcgnorm(1000, 1+1i, scale=2, pseudoscale=0.6+0.8i, shape=0.5)
+x <- rcgnorm(1000, 1+1i, scaleConjugate=2, scaleDirect=0.6+0.8i, shape=0.5)
 plot(x)
-dcgnorm(x[1:5], 1+1i, scale=2, pseudoscale=0.6+0.8i, shape=0.5)
+dcgnorm(x[1:5], 1+1i, scaleConjugate=2, scaleDirect=0.6+0.8i, shape=0.5)
 
 }
 \references{

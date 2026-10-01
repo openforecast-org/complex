@@ -6,11 +6,11 @@ Branch: `dcgnorm` (from `master` at `a8b660c`, v1.0.2). Prototype with numerical
 Motivation: residuals of wind data have much heavier tails than normal (see the cARIMA wind
 project). The complex normal likelihood in `clm()` is the only likelihood available. Goal: add the
 complex generalised normal (CGN) with shape β estimated, and only ONE extra estimated parameter,
-by concentrating the scale and pseudo-scale out analytically.
+by concentrating the conjugate and direct scales out analytically.
 
 ## 1. The distribution
 
-Parameters: location μ (complex), scale α² > 0 (real), pseudo-scale ψ² (complex, |ψ²| < α²),
+Parameters: location μ (complex), conjugate scale α² > 0 (real), direct scale ψ² (complex, |ψ²| < α²),
 shape β > 0. For e = z − μ:
 
     Q(e)  = 2 (α²|e|² − Re(Conj(ψ²) e²)) / (α⁴ − |ψ²|²)
@@ -18,18 +18,19 @@ shape β > 0. For e = z − μ:
 
 - β = 1: complex normal with σ² = α², ς² = ψ² (checked in the prototype: max log-density difference from `dcnorm` is 2e-16).
 - β < 1 heavier tails (β = 0.5 Laplace-like), β → ∞ uniform on an ellipse.
-- Moments: variance σ² = k(β) α², pseudo-variance ς² = k(β) ψ², where
+- Moments: conjugate variance σ² = k(β) α², direct variance ς² = k(β) ψ², where
   k(β) = 2^(1/β) Γ(2/β) / (2 Γ(1/β)). Hence ς²/σ² = ψ²/α² for all β.
 - Radial law: Q^β ~ Gamma(shape = 1/β, scale = 2). Used for simulation and diagnostics.
 - Equivalent to the bivariate exponential power distribution (Gómez et al., 1998) and to the
   complex generalized Gaussian of Novey, Adalı & Roy (2010, IEEE TSP 58(3)) under the
   `cnorm.R` mapping Σ = ½[[α²+Re ψ², Im ψ²],[Im ψ², α²−Re ψ²]].
 
-**Parameterisation (DECIDED):** scale parameterisation. Functions take `scale` (α², real) and
-`pseudoscale` (ψ², complex) plus `shape` (β). The closed form is simplest in the scale (section 2);
-the variance form only adds the factor k(β). At shape = 1, scale = σ² and pseudoscale = ς², so
-`dcgnorm(q, mu, scale=s, pseudoscale=p, shape=1)` == `dcnorm(q, mu, sigma2=s, varsigma2=p)`.
-`sigma.clm()` keeps returning the covariance of residuals; `object$scale` holds (α², ψ²) for dcgnorm.
+**Parameterisation (DECIDED):** scale parameterisation. Functions take `scaleConjugate` (α², real)
+and `scaleDirect` (ψ², complex) plus `shape` (β); renamed from `scale`/`pseudoscale` on 2026-10-01
+to follow the conjugate/direct terminology of the book. The closed form is simplest in the scale (section 2);
+the variance form only adds the factor k(β). At shape = 1, scaleConjugate = σ² and scaleDirect = ς²,
+so `dcgnorm(q, mu, scaleConjugate=s, scaleDirect=p, shape=1)` == `dcnorm(q, mu, sigma2=s, varsigma2=p)`.
+`sigma.clm()` keeps returning the covariance of residuals; `object$scale` holds c(scaleConjugate=α², scaleDirect=ψ²) for dcgnorm.
 
 ## 2. Concentrated likelihood (closed form)
 
@@ -46,8 +47,8 @@ Prototype check (T = 20,000, β = 0.5, α² = 2, ψ² = 0.6+0.8i): closed form �
 full numeric MLE −101981.5; the β that maximises the closed-form likelihood is 0.50.
 
 Exact MLE of ρ (fixed point wₜ = Qₜ^(β−1), α² = (β/T) Σ wₜ|eₜ|², ψ² = (β/T) Σ wₜ eₜ²) is NOT
-implemented (DECIDED). Document in `?clm` and `?dcgnorm` that the scale/pseudo-scale estimates are
-approximate ML for β ≠ 1: ρ is the moment estimator, the scale is exact ML given ρ.
+implemented (DECIDED). Document in `?clm` and `?dcgnorm` that the conjugate/direct scale estimates are
+approximate ML for β ≠ 1: ρ is the moment estimator, the conjugate scale is exact ML given ρ.
 
 ## Status (2026-09-25)
 
@@ -65,12 +66,12 @@ Each phase ends with `R CMD build` + `R CMD check --no-manual` clean and its tes
 Commit per phase.
 
 ### Phase 1 — distribution functions (`R/cgnorm.R`, new)
-- `dcgnorm(q, mu=0, scale=1, pseudoscale=0, shape=1, log=FALSE)`. Default shape 1 = normal.
+- `dcgnorm(q, mu=0, scaleConjugate=1, scaleDirect=0, shape=1, log=FALSE)`. Default shape 1 = normal.
   In greybox `dgnorm` shape 2 = normal (exponent on |x|, not on the quadratic form); document
   that shape here equals greybox shape / 2.
-- `rcgnorm(n, mu, scale, pseudoscale, shape)` via the Gamma radial law and a uniform angle.
+- `rcgnorm(n, mu, scaleConjugate, scaleDirect, shape)` via the Gamma radial law and a uniform angle.
 - Exported helper or documented formula k(β) to convert scale to covariance.
-- Validate: scale > 0, |pseudoscale| < scale, shape > 0.
+- Validate: scaleConjugate > 0, |scaleDirect| < scaleConjugate, shape > 0.
 - No `p`/`q` functions in this release (no closed form; `qcnorm` semantics are unusual anyway).
 - Roxygen docs in the `cnormal` style; export; NAMESPACE via roxygen.
 
@@ -152,7 +153,7 @@ Proposed fix (Phase 0, separate commit, NEWS entry as a behaviour change):
 
 ## 6. Decisions (2026-09-25)
 
-1. Scale parameterisation (`scale`, `pseudoscale`).
+1. Scale parameterisation (`scaleConjugate`, `scaleDirect`; originally `scale`, `pseudoscale`).
 2. `distribution` argument, as in `alm()`.
 3. IC count: approved and implemented as proposed in section 5 (Phase 0 done, per-series nparam kept,
    legion-style AICc/BICc). BJsales check: top-3 orders by AICc and BIC unchanged before/after

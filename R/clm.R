@@ -46,9 +46,11 @@
 #' \item \code{"dcnorm"} - complex normal distribution (see \link[complex]{dcnorm});
 #' \item \code{"dcgnorm"} - complex generalised normal distribution
 #' (see \link[complex]{dcgnorm}). Its shape parameter is estimated, unless it is provided via
-#' \code{shape} in the ellipsis. The scale and the pseudo-scale are not estimated by the optimiser:
-#' the circularity coefficient (pseudo-scale divided by scale) is taken from the moments of
-#' the residuals and the scale is the maximum likelihood estimate given that coefficient. This is
+#' \code{shape} in the ellipsis. The conjugate and the direct scales are not estimated by the
+#' optimiser: the circularity coefficient (direct scale divided by conjugate scale) is taken from
+#' the moments of the residuals and the conjugate scale is the maximum likelihood estimate given
+#' that coefficient. They are returned in \code{scale} as \code{scaleConjugate} and
+#' \code{scaleDirect}. This is
 #' exact maximum likelihood only for \code{shape=1}, and an approximation otherwise.
 #' }
 #' @param orders vector of orders of complex ARIMA(p,d,q).
@@ -1032,7 +1034,7 @@ clm <- function(formula, data, subset, na.action,
     matrixXreg[] <- fitterReturn$matrixXreg;
     if(distribution=="dcgnorm"){
         cgnormValues <- cgnormConcentrated(y - mu, shape);
-        scale <- c(scale=cgnormValues$scale, pseudoscale=cgnormValues$pseudoscale);
+        scale <- c(scaleConjugate=cgnormValues$scaleConjugate, scaleDirect=cgnormValues$scaleDirect);
         ellipsis$shape <- shape;
         ellipsis$shapeEstimated <- shapeEstimate;
     }
