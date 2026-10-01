@@ -21,6 +21,7 @@ Bugfixes:
 * clm() with loss="CLS" and MA terms failed with an unclear error from the optimiser. It now stops with an explanation (the CLS loss is complex-valued and cannot be minimised numerically).
 * clm() with nothing to estimate (e.g. cARIMA(0,1,0) without intercept) failed in the optimiser.
 * The documentation of the ellipsis in clm() was hidden by the one of sigma.clm().
+* vcov(), summary() and confint() of clm() failed when clm() was called from another function with variables as arguments (e.g. distribution=dist inside a wrapper): vcov.clm() re-estimates the model from the stored call, where those variables do not exist. clm() now stores the values of the arguments in the call.
 
 
 complex v1.0.2 (Release data: 2026-02-03)

@@ -168,6 +168,19 @@ clm <- function(formula, data, subset, na.action,
     cl <- match.call();
     # This is needed in order to have a reasonable formula saved, so that there are no issues with it
     cl$formula <- eval(cl$formula);
+    # Keep the values of the other arguments rather than their expressions: vcov.clm()
+    # re-estimates the model from this call in its own environment, where the variables of a
+    # calling function (e.g. distribution=dist inside a wrapper) do not exist. data and subset are
+    # replaced there by the stored ones.
+    ellipsisValues <- list(...);
+    for(argName in setdiff(names(cl)[-1], c("formula","data","subset",""))){
+        if(argName %in% names(ellipsisValues)){
+            cl[argName] <- list(ellipsisValues[[argName]]);
+        }
+        else{
+            cl[argName] <- list(get(argName));
+        }
+    }
     if(is.function(loss)){
         lossFunction <- loss;
         loss <- "custom";
